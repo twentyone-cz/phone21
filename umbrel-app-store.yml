@@ -1,0 +1,6 @@
+# Toto repo je zároveň Umbrel community app store: umbreld vyžaduje tento
+# soubor v KOŘENI repa, appky hledá jako */umbrel-app.yml (ostatní adresáře
+# ignoruje) a klonuje anonymně přes HTTPS -> repo musí být VEŘEJNÉ.
+# ID appek musí mít prefix ID storu ("eddie-").
+id: "eddie" # jen a-z a pomlčky
+name: "Eddie Apps"

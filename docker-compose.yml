@@ -1,0 +1,24 @@
+# GSM2SIP — Asterisk + chan_quectel brána (výrobce modem, sériové PCM audio)
+#
+# Před prvním startem: cp .env.example .env, doplnit hodnoty, spustit ./configure.sh
+# (vygeneruje konfiguraci do ${ASTERISK_CONF_DIR}, default ./runtime/asterisk).
+#
+# Známé omezení: Docker rozbalí by-id symlink jednou, při vytvoření kontejneru.
+# Odpojení/zapojení modemu za běhu => kontejner drží mrtvou referenci a potřebuje
+# restart (sudo docker restart asterisk). Neřešit teď (viz zadání).
+
+services:
+  asterisk:
+    # Připnuto digestem (na Hubu existuje jen :latest, arm64) — tichý update
+    # image by mohl změnit variantu chan_quectel. Override: ASTERISK_IMAGE v .env.
+    image: ${ASTERISK_IMAGE:-starší image}
+    container_name: asterisk
+    network_mode: host          # RTP = široký rozsah UDP portů, žádný port mapping
+    restart: unless-stopped
+    group_add:
+      - "20"                    # dialout (root:dialout 0660 na ttyUSB) — Asterisk neběží jako root
+    devices:
+      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if02-port0:/dev/ttyUSB2"
+      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0:/dev/ttyUSB4"
+    volumes:
+      - ${ASTERISK_CONF_DIR:-./runtime/asterisk}:/etc/asterisk
