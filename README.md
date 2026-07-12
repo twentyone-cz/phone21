@@ -35,18 +35,20 @@ je připravený v `eddie-passthrough-test/` (viz níže). Do potvrzení běží 
 Fází 1–5 jako **samostatný compose stack** (mimo umbreld) — funguje v obou
 architekturách beze změny, liší se jen místo, kam se generuje konfigurace.
 
-**Toto repo je zároveň community app store** („Eddie Apps", id `eddie`):
-`umbrel-app-store.yml` musí být v kořeni repa, appky umbreld hledá jako
-`*/umbrel-app.yml` a ostatní adresáře ignoruje. Klonuje anonymně přes HTTPS —
-**repo musí být veřejné** (tajemství v něm nejsou žádná).
+**Community store žije v samostatném repu**
+[`Eddie/umbrel-store`](https://it-one.cz/git/Eddie/umbrel-store) (id `eddie`,
+stejný vzor jako med-O-mat): tam patří jen `umbrel-app-store.yml` + adresáře
+appek. Zdrojová podoba appek žije tady v projektovém repu a do storu se
+kopíruje při publikaci. Store repo musí zůstat veřejné — umbreld ho klonuje
+anonymně přes HTTPS.
 
 ### Fáze 0.5 — potvrzující test na zařízení
 
-1. Pushni repo na `https://it-one.cz/git/Eddie/Gsm2Sip` a nastav ho jako
-   **veřejné** (anonymní 404 = umbreld ho nenaklonuje).
-2. Umbrel UI → App Store → menu (⋮) → **Community App Stores** → vložit
-   `https://it-one.cz/git/Eddie/Gsm2Sip` → Open → nainstalovat
-   **Passthrough Test (Fáze 0.5)**.
+1. Zkopírovat `eddie-passthrough-test/` z tohoto repa do kořene
+   `Eddie/umbrel-store` a pushnout.
+2. Umbrel UI → App Store → menu (⋮) → **Community App Stores** →
+   `https://it-one.cz/git/Eddie/umbrel-store` (pokud tam z med-O-matu už je,
+   jen Update) → Open → nainstalovat **Passthrough Test (Fáze 0.5)**.
 3. Přečíst výsledek (předpoklad: modem připojen — `host-setup.sh` krok 2 OK):
    ```bash
    sudo docker logs eddie-passthrough-test_test_1
@@ -218,8 +220,8 @@ asterisk/                   # ŠABLONY konfigurace (tokeny ${SIP_USER}/${SIP_PAS
   pjsip.conf                #   transporty UDP/TCP (+TLS připraveno), 1 endpoint
   extensions.conf           #   dialplan oba směry + echo test 600 + SMS stub (F6)
   modules.conf, rtp.conf, logger.conf
-umbrel-app-store.yml        # kořen repa = community store "Eddie Apps" (id eddie)
-eddie-passthrough-test/     # Fáze 0.5 — test devices + host net přes umbreld
+eddie-passthrough-test/     # Fáze 0.5 — test devices + host net (zdroj; publikuje
+                            # se kopií do repa Eddie/umbrel-store)
 ```
 
 ## Známá omezení
