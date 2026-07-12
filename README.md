@@ -144,8 +144,10 @@ v `quectel.conf`, případně `AT+CPCMFRM`).
 ### Fáze 5 — vzdálený přístup
 
 **Režim A (default, implementovaný): tunel + Linphone.**
-1. Nainstalovat **Tailscale** z Umbrel app storu (nebo WireGuard), přidat Pi
-   do tailnetu; na telefonu (Pixel/GrapheneOS) Tailscale klient.
+1. Tunel — na Pi už běží **Nostr VPN** (Umbrel appka, mesh nad WireGuardem,
+   rozhraní utun100, IP 10.44.170.108): první volba je připojit telefon
+   invitem do téhle mesh sítě. Ověřit klienta na GrapheneOS a spolehlivost
+   na pozadí; fallback je **Tailscale** z Umbrel storu (nebo WireGuard).
 2. Linphone: SIP účet na **tailscale IP Pi**, transport **TCP** (ne UDP —
    delší NAT keepalive, méně probouzení rádia), registration expiry např.
    3600 s, zapnout background mode / foreground service + výjimka
