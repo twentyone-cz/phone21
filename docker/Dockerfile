@@ -38,4 +38,6 @@ RUN moddir="$(dirname "$(find /usr/lib -name 'chan_pjsip.so' -path '*asterisk*' 
     && rm /tmp/chan_quectel.so
 
 # /etc/asterisk dodává bind-mount z runtime adresáře (viz docker-compose.yml)
-CMD ["asterisk", "-f", "-U", "asterisk", "-G", "asterisk"]
+# POZOR: bez -G! S rungroup Asterisk zahodí supplementary skupiny (dialout →
+# Permission denied na ttyUSB). Samotné -U jde přes initgroups(), dialout drží.
+CMD ["asterisk", "-f", "-U", "asterisk"]
