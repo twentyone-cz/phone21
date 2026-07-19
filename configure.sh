@@ -59,6 +59,14 @@ if [[ ${FORCE} -ne 1 && -d "${TARGET}" && -n "$(ls -A "${TARGET}" 2>/dev/null)" 
 fi
 mkdir -p "${TARGET}"
 
+# Předchozí generace mohla soubory chownout na UID asteriska (viz Práva níže)
+# — před přegenerováním si vlastnictví vezmeme zpět, jinak render spadne
+# na Permission denied.
+if [[ -n "$(ls -A "${TARGET}" 2>/dev/null)" && ! -w "${TARGET}/pjsip.conf" ]]; then
+  sudo chown -R "$(id -u):$(id -g)" "${TARGET}"
+  chmod -R u+w "${TARGET}"
+fi
+
 # --- Seed z image (volitelně) --------------------------------------------------
 # Základ /etc/asterisk z image zachová konfiguraci, se kterou je image laděný;
 # naše šablony se položí přes něj. Bez dockeru se použije jen minimální sada

@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build git ca-certificates \
       asterisk-dev libsqlite3-dev libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/RoEdAl/asterisk-chan-quectel /src
+# plný clone včetně tagů — CMake si verzi bere z `git describe`
+RUN git clone https://github.com/RoEdAl/asterisk-chan-quectel /src
 WORKDIR /src
 # preferuj Ninja, fallback na make; RelWithDebInfo kvůli použitelným backtrace
 RUN (cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
