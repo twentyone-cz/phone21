@@ -77,10 +77,13 @@ sudo ./host-setup.sh
 cp .env.example .env && chmod 600 .env
 $EDITOR .env            # SIP_USER, silné SIP_PASSWORD (openssl rand -base64 24)
 
-# 3) Vygenerovat runtime konfiguraci (jednou; přegenerování jen --force)
+# 3) Build image (Asterisk 20 + RoEdAl chan_quectel; poprvé ~5-10 min)
+sudo docker compose build
+
+# 4) Vygenerovat runtime konfiguraci (jednou; přegenerování jen --force)
 ./configure.sh
 
-# 4) Start
+# 5) Start
 sudo docker compose up -d
 ```
 
@@ -135,11 +138,12 @@ Příchozí: zavolat na číslo SIM → zvoní softphone. Testovat: zvuk oběma 
 DTMF, korektní zavěšení z obou stran, hlasitost/echo (doladit `rxgain`/`txgain`
 v `quectel.conf`, případně `AT+CPCMFRM`).
 
-> **Známý problém — hangup detection:** modem nemá spolehlivý URC o ukončení
-> hovoru; bez `ccinfo`/`dsci` (RoEdAl fork chan_quectel) zůstávají viset
-> kanály. Pokud to image `starší image` neumí,
-> bude potřeba postavit vlastní image z `github.com/RoEdAl/asterisk-chan-quectel`
-> — řešit ve Fázi 4, až se to projeví.
+> **Historie — proč vlastní image:** původní image `starší image`
+> (starý chan_quectel) **segfaultoval Asterisk při odesílání DTMF** do modemu
+> (reprodukováno: 4 pády v řadě, restart smyčkou) a neuměl `dsci` hangup
+> detection. Default je proto vlastní build z RoEdAl forku (`docker/`),
+> `quectel.conf` má `dsci=on` (modem neumí Quectel `ccinfo`). Pozor:
+> RoEdAl změnil sémantiku `rxgain`/`txgain` (0 = ztlumeno, -1 = default).
 
 ### Fáze 5 — vzdálený přístup
 

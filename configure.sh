@@ -64,7 +64,7 @@ mkdir -p "${TARGET}"
 # naše šablony se položí přes něj. Bez dockeru se použije jen minimální sada
 # šablon (funguje taky — chybějící .conf = defaulty Asterisku).
 # Stejný default jako v docker-compose.yml; override přes ASTERISK_IMAGE v .env.
-IMAGE="${ASTERISK_IMAGE:-starší image}"
+IMAGE="${ASTERISK_IMAGE:-gsm2sip-asterisk:local}"
 DOCKER="docker"
 if ! docker info >/dev/null 2>&1; then
   if sudo docker info >/dev/null 2>&1; then DOCKER="sudo docker"; else DOCKER=""; fi

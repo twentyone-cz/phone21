@@ -9,9 +9,12 @@
 
 services:
   asterisk:
-    # Připnuto digestem (na Hubu existuje jen :latest, arm64) — tichý update
-    # image by mohl změnit variantu chan_quectel. Override: ASTERISK_IMAGE v .env.
-    image: ${ASTERISK_IMAGE:-starší image}
+    # Vlastní image (Asterisk 20 + RoEdAl chan_quectel) — starší image image
+    # segfaultoval při DTMF a neumí dsci hangup detection. První start:
+    #   sudo docker compose build
+    # Fallback na původní image: ASTERISK_IMAGE v .env (viz .env.example).
+    image: ${ASTERISK_IMAGE:-gsm2sip-asterisk:local}
+    build: ./docker
     container_name: asterisk
     network_mode: host          # RTP = široký rozsah UDP portů, žádný port mapping
     restart: unless-stopped
