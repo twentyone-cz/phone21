@@ -53,23 +53,24 @@ done
 echo "[3/3] Modem odpovídá na ATI"
 if [[ -e "${AT_PORT}" ]]; then
   at_dev="$(readlink -f "${AT_PORT}")"
-  # clocal: open nesmí čekat na carrier; timeout: kdyby port držel jiný proces
-  if timeout 3 stty -F "${at_dev}" 115200 raw -echo clocal -crtscts 2>/dev/null; then
-    # čtení otevřít dřív, než se pošle příkaz, ať odpověď neuteče
-    resp="$(
-      timeout 5 bash -c '
-        exec 3<"$1"
-        printf "ATI\r" > "$1"
-        timeout 3 cat <&3
-      ' _ "${at_dev}" | tr -d '\r'
-    )" || true
-    if grep -qiE 'modem|výrobce|OK' <<<"${resp}"; then
-      ok "ATI odpověď: $(grep -m1 -iE 'modem|Model|Revision' <<<"${resp}" || echo OK)"
-    else
-      err "modem na ATI neodpověděl (port drží jiný proces? běží ModemManager? kontejner?)"
-    fi
+  # stty je best-effort: USB AT porty termios z velké části ignorují a přísná
+  # zpětná verifikace GNU stty pak hlásí "unable to perform all requested
+  # operations", i když port normálně funguje. Rozhoduje výhradně ATI odpověď.
+  # (clocal: open nesmí čekat na carrier; timeout: kdyby port držel jiný proces)
+  timeout 3 stty -F "${at_dev}" 115200 raw -echo clocal -crtscts 2>/dev/null \
+    || echo "  POZN: stty nenastavilo všechny parametry — nevadí, rozhoduje ATI test"
+  # čtení otevřít dřív, než se pošle příkaz, ať odpověď neuteče
+  resp="$(
+    timeout 5 bash -c '
+      exec 3<"$1"
+      printf "ATI\r" > "$1"
+      timeout 3 cat <&3
+    ' _ "${at_dev}" | tr -d '\r'
+  )" || true
+  if grep -qiE 'modem|výrobce|OK' <<<"${resp}"; then
+    ok "ATI odpověď: $(grep -m1 -iE 'modem|Model|Revision' <<<"${resp}" || echo OK)"
   else
-    err "stty na ${at_dev} selhalo"
+    err "modem na ATI neodpověděl (port drží jiný proces? kontejner? USB stav — zkus přepojit modem)"
   fi
 else
   err "AT port chybí — přeskakuji test ATI"
