@@ -144,6 +144,18 @@ v `quectel.conf`, případně `AT+CPCMFRM`).
 > detection. Default je proto vlastní build z RoEdAl forku (`docker/`),
 > `quectel.conf` má `dsci=on` (modem neumí Quectel `ccinfo`). Pozor:
 > RoEdAl změnil sémantiku `rxgain`/`txgain` (0 = ztlumeno, -1 = default).
+>
+> **Kritický detail buildu — `-Wl,-Bsymbolic`:** chan_quectel má interní
+> funkce jako globální symboly (`channel_new`, `cpvt_alloc`, …) a volá je
+> přes PLT. V procesu Asterisku je ale i `cizí knihovna`, která exportuje
+> vlastní globální `channel_new` — bez `-Bsymbolic` linker navázal volání
+> na cizí knihovna a všechny odchozí hovory padaly na „Unable to allocate channel
+> structure" (cause 44), bez jediného užitečného logu. Stejná třída
+> problému (kolize globálních symbolů chan_dongle/chan_quectel) je nejspíš
+> i příčinou DTMF segfaultu původního image. Diagnostika: `objdump -d
+> --disassemble=channel_request` (volání přes `@plt`) + sken `T channel_new`
+> přes všechna DSO z `/proc/1/maps` (vyžaduje `docker exec --privileged` —
+> proces po setuid není dumpable).
 
 ### Fáze 5 — vzdálený přístup
 

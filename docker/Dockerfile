@@ -17,16 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # plný clone včetně tagů — CMake si verzi bere z `git describe`
 RUN git clone https://github.com/RoEdAl/asterisk-chan-quectel /src
 WORKDIR /src
-# DIAGNOSTIKA: channel_new umí selhat tiše (bez logu) na dvou místech —
-# přidáme explicitní ERROR log, ať je z produkčního logu vidět které.
-RUN perl -0pi -e 's/if \(!cpvt\) \{\s*\n\s*return NULL;/if (!cpvt) {\n        ast_log(LOG_ERROR, "GSM2SIP-DBG: cpvt_alloc failed\\n");\n        return NULL;/s' src/channel.c \
- && perl -0pi -e 's/if \(!channel\) \{\s*\n\s*cpvt_free\(cpvt\);/if (!channel) {\n        ast_log(LOG_ERROR, "GSM2SIP-DBG: ast_channel_alloc failed\\n");\n        cpvt_free(cpvt);/s' src/channel.c \
- && perl -0pi -e 's/(\nstruct ast_channel\* channel_new\(.*?\)\n\{)/$1\n    ast_log(LOG_ERROR, "GSM2SIP-DBG: channel_new entered\\n");/s' src/channel.c \
- && [ "$(grep -c 'GSM2SIP-DBG' src/channel.c)" = "3" ]
 # preferuj Ninja, fallback na make; RelWithDebInfo kvůli použitelným backtrace.
-# -Bsymbolic: interní symboly modulu (channel_new, cpvt_alloc, ...) nejsou
-# static a bez toho se volají přes PLT — jakýkoli dřív načtený objekt se
-# stejným jménem symbolu by je mohl unést (interpozice).
+# -Bsymbolic je KRITICKÉ: interní symboly modulu (channel_new, cpvt_alloc, ...)
+# nejsou static a volají se přes PLT. V procesu Asterisku je i cizí knihovna,
+# která exportuje VLASTNÍ globální `channel_new` — bez -Bsymbolic dynamický
+# linker navázal volání na cizí knihovna, ta vracela NULL a odchozí hovory padaly
+# na "Unable to allocate channel structure" (ověřeno objdump + /proc/maps,
+# 2026-07-20). S -Bsymbolic se interní reference váží už při linku.
 RUN (cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-Bsymbolic" \
       || cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
