@@ -250,13 +250,25 @@ eddie-passthrough-test/     # Fáze 0.5 — test devices + host net (zdroj; publ
   appky `ee-gateway` — zatím neřešit.)
 - Sériové číslo v by-id cestě je u výrobce placeholder (`0123456789ABCDEF`,
   stejné na všech kusech) — u jednoho modemu nevadí.
-- Diakritika v SMS = UCS‑2, 70 znaků/segment (Fáze 6).
+- Diakritika v odchozí SMS = UCS‑2, 70 znaků/segment.
 
-## Fáze 6 (zatím neimplementováno)
+## SMS ↔ Linphone
 
-SMS ↔ Signal přes OneGW (paralelní projekt, drží celou Signal stranu).
-Na bráně vznikne: dialplan SMS hook → HTTP POST na OneGW (fronta + retry,
-2FA kódy nesmí zapadnout), HTTP shim pro odchozí SMS, ošetření
-alfanumerických odesílatelů a vícedílných SMS. Prostudovat existující API
-OneGW, nevymýšlet nový kontrakt. Plus zabalení jako Umbrel appka **GSM2SIP**
-(id `eddie-gsm2sip`) do tohoto storu.
+SMS jede přímo do/z vestavěného chatu v Linphone (žádný Signal, žádný externí
+gateway). Detaily implementace a stav v `asterisk/extensions.conf`
+(`[quectel-incoming]` exten `sms`/`report`, context `[messages]`):
+- **Příchozí** (mobil → Linphone chat): SMS přijde jako zpráva od odesílatele.
+- **Odchozí** (Linphone chat → mobil): napiš chat na `<číslo>@<brána>`.
+- **Potvrzení odeslání do sítě**: po odeslání přijde do chatu „✓ SMS odeslána
+  do sítě (ref …)" — message reference od operátora = důkaz, že SMS opustila
+  RPi, ne že uvázla mezi telefonem a bránou.
+- **Alfanumeričtí odesílatelé** (banky, „AIRBANK"): příchozí projde, odpovědět
+  nelze — pokus o odpověď dostane srozumitelnou chybovou zprávu, ne tiché
+  zahození.
+
+Známé omezení / TODO:
+- **Spolehlivost (krok 2, zatím neimplementováno):** žurnál příchozích SMS na
+  disk RPi + retry doručení + mazání ze SIM až po zápisu. Do té doby je
+  `autodeletesms=no` — hlídej zaplnění SIM (`quectel sms delete all quectel0`).
+- IMDN doručenky (potvrzení, že telefon zprávu zobrazil) nejdou: Asterisk 20
+  `res_pjsip_messaging` odmítá `message/cpim` mimo dialog (415).
