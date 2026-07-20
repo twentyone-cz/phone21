@@ -18,6 +18,8 @@ services:
     container_name: asterisk
     network_mode: host          # RTP = široký rozsah UDP portů, žádný port mapping
     restart: unless-stopped
+    environment:
+      TZ: Europe/Prague       # jinak kontejner loguje v UTC (2h posun proti realitě)
     group_add:
       - "20"                    # dialout (root:dialout 0660 na ttyUSB) — Asterisk neběží jako root
     devices:
