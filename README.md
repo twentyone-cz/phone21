@@ -266,9 +266,18 @@ gateway). Detaily implementace a stav v `asterisk/extensions.conf`
   nelze — pokus o odpověď dostane srozumitelnou chybovou zprávu, ne tiché
   zahození.
 
+**Spolehlivost (krok 2):** každá příchozí SMS se zapisuje do žurnálu
+`runtime/smsdata/journal.jsonl` (text SMS v base64). Když doručení do
+softphonu selže (telefon offline, po restartu brány…), zpráva se zařadí do
+fronty a opakuje s backoffem 60 s → 32 min (give-up po 10 pokusech ≈ 3,5 h;
+v žurnálu pak `failed-giveup`). Retry je vždy nový SIP MESSAGE (nový
+Call-ID) — replay by liblinphone tiše zahodil jako duplikát. Naplánované
+pokusy leží v `runtime/spool/` (call files) a přežijí restart kontejneru.
+
 Známé omezení / TODO:
-- **Spolehlivost (krok 2, zatím neimplementováno):** žurnál příchozích SMS na
-  disk RPi + retry doručení + mazání ze SIM až po zápisu. Do té doby je
-  `autodeletesms=no` — hlídej zaplnění SIM (`quectel sms delete all quectel0`).
 - IMDN doručenky (potvrzení, že telefon zprávu zobrazil) nejdou: Asterisk 20
-  `res_pjsip_messaging` odmítá `message/cpim` mimo dialog (415).
+  `res_pjsip_messaging` odmítá `message/cpim` mimo dialog (415). Náhrada:
+  žurnál + retry výše.
+- `autodeletesms=no` (SMS se podle pozorování na SIM stejně neukládají —
+  driver je bere přímou cestou; kdyby se SIM plnila:
+  `quectel sms delete all quectel0`).

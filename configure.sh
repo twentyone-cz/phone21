@@ -112,6 +112,9 @@ done
 
 touch "${MARKER}"   # render doběhl celý — od teď je konfigurace „hotová"
 
+# --- Datové adresáře (žurnál/fronta SMS, retry spool) --------------------------
+mkdir -p runtime/smsdata/queue runtime/spool
+
 # --- Práva ---------------------------------------------------------------------
 # Asterisk v kontejneru neběží jako root a jeho UID neznáme předem — zkusíme ho
 # zjistit z image a runtime adresář mu chownout (pak stačí 750/640). Když to
@@ -128,8 +131,12 @@ if [[ "${ast_uid}" =~ ^[0-9]+$ ]]; then
   if ! sudo chown -R "${ast_uid}" "${TARGET}" 2>/dev/null; then
     chmod 755 "${TARGET}" && chmod 644 "${TARGET}"/*.conf
   fi
+  # datové adresáře musí mít zapisovatelné asterisk v kontejneru
+  sudo chown -R "${ast_uid}" runtime/smsdata runtime/spool 2>/dev/null \
+    || chmod -R 777 runtime/smsdata runtime/spool
 else
   chmod 755 "${TARGET}" && chmod 644 "${TARGET}"/*.conf
+  chmod -R 777 runtime/smsdata runtime/spool   # fallback bez známého UID
 fi
 
 echo "OK: konfigurace vygenerována do ${TARGET}."

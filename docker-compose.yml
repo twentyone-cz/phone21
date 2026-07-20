@@ -27,3 +27,6 @@ services:
       - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0:/dev/ttyUSB4"
     volumes:
       - ${ASTERISK_CONF_DIR:-./runtime/asterisk}:/etc/asterisk
+      - ./scripts:/usr/local/gsm2sip:ro          # sms-queue.sh (žurnál+retry)
+      - ./runtime/smsdata:/var/lib/gsm2sip       # žurnál, fronta, smsdb (persistentní)
+      - ./runtime/spool:/var/spool/asterisk/outgoing  # naplánované retry (call files)
