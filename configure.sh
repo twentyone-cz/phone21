@@ -31,6 +31,7 @@ source .env
 
 : "${SIP_USER:?V .env chybí SIP_USER}"
 : "${SIP_PASSWORD:?V .env chybí SIP_PASSWORD}"
+: "${SIP_DOMAIN:?V .env chybí SIP_DOMAIN (doména/IP, na kterou je softphone registrovaný — viz .env.example)}"
 if ! [[ "${SIP_USER}" =~ ^[A-Za-z0-9_-]+$ ]]; then
   echo "CHYBA: SIP_USER smí obsahovat jen A-Za-z0-9_- (jde do názvů pjsip sekcí a dialplanu)." >&2
   exit 1
@@ -100,10 +101,12 @@ fi
 esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 SIP_USER_ESC="$(esc "${SIP_USER}")"
 SIP_PASSWORD_ESC="$(esc "${SIP_PASSWORD}")"
+SIP_DOMAIN_ESC="$(esc "${SIP_DOMAIN}")"
 for f in asterisk/*.conf; do
   base="$(basename "$f")"
   sed -e "s|\${SIP_USER}|${SIP_USER_ESC}|g" \
       -e "s|\${SIP_PASSWORD}|${SIP_PASSWORD_ESC}|g" \
+      -e "s|\${SIP_DOMAIN}|${SIP_DOMAIN_ESC}|g" \
       "$f" > "${TARGET}/${base}"
 done
 
