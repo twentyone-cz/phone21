@@ -21,10 +21,16 @@ WORKDIR /src
 # přidáme explicitní ERROR log, ať je z produkčního logu vidět které.
 RUN perl -0pi -e 's/if \(!cpvt\) \{\s*\n\s*return NULL;/if (!cpvt) {\n        ast_log(LOG_ERROR, "GSM2SIP-DBG: cpvt_alloc failed\\n");\n        return NULL;/s' src/channel.c \
  && perl -0pi -e 's/if \(!channel\) \{\s*\n\s*cpvt_free\(cpvt\);/if (!channel) {\n        ast_log(LOG_ERROR, "GSM2SIP-DBG: ast_channel_alloc failed\\n");\n        cpvt_free(cpvt);/s' src/channel.c \
- && [ "$(grep -c 'GSM2SIP-DBG' src/channel.c)" = "2" ]
-# preferuj Ninja, fallback na make; RelWithDebInfo kvůli použitelným backtrace
+ && perl -0pi -e 's/(\nstruct ast_channel\* channel_new\(.*?\)\n\{)/$1\n    ast_log(LOG_ERROR, "GSM2SIP-DBG: channel_new entered\\n");/s' src/channel.c \
+ && [ "$(grep -c 'GSM2SIP-DBG' src/channel.c)" = "3" ]
+# preferuj Ninja, fallback na make; RelWithDebInfo kvůli použitelným backtrace.
+# -Bsymbolic: interní symboly modulu (channel_new, cpvt_alloc, ...) nejsou
+# static a bez toho se volají přes PLT — jakýkoli dřív načtený objekt se
+# stejným jménem symbolu by je mohl unést (interpozice).
 RUN (cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-      || cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo) \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-Bsymbolic" \
+      || cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-Bsymbolic") \
     && cmake --build build
 RUN find build -name 'chan_quectel.so' -exec cp {} /chan_quectel.so \; \
     && test -f /chan_quectel.so
