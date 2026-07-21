@@ -269,10 +269,13 @@ gateway). Detaily implementace a stav v `asterisk/extensions.conf`
 **Spolehlivost (krok 2):** každá příchozí SMS se zapisuje do žurnálu
 `runtime/smsdata/journal.jsonl` (text SMS v base64). Když doručení do
 softphonu selže (telefon offline, po restartu brány…), zpráva se zařadí do
-fronty a opakuje s backoffem 60 s → 32 min (give-up po 10 pokusech ≈ 3,5 h;
-v žurnálu pak `failed-giveup`). Retry je vždy nový SIP MESSAGE (nový
-Call-ID) — replay by liblinphone tiše zahodil jako duplikát. Naplánované
-pokusy leží v `runtime/spool/` (call files) a přežijí restart kontejneru.
+fronty a opakuje s backoffem 60 s → strop 10 min. Pokus o doručení se dělá
+**jen když je softphone registrovaný** (kontrola `PJSIP_AOR` v každém tiku
+— bez SIP provozu), takže po připojení telefonu SMS dorazí do ~10 minut.
+Give-up podle stáří zprávy: **TTL 48 h** od přijetí (v žurnálu pak
+`failed-ttl`). Retry je vždy nový SIP MESSAGE (nový Call-ID) — replay by
+liblinphone tiše zahodil jako duplikát. Naplánované pokusy leží v
+`runtime/spool/` (call files) a přežijí restart kontejneru.
 
 Známé omezení / TODO:
 - IMDN doručenky (potvrzení, že telefon zprávu zobrazil) nejdou: Asterisk 20
