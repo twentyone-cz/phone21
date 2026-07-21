@@ -226,6 +226,15 @@ Stačí zálohovat dvě věci (obě mimo git):
 Obnova = nakopírovat repo + tyto dva kusy, `sudo ./host-setup.sh`,
 `sudo docker compose up -d`.
 
+## Web UI
+
+`http://<IP-brány>:8090` (Basic auth, heslo `WEBUI_PASSWORD` z `.env`;
+uživatel libovolný). Tři záložky: **Stav** (modem, RSSI, SIP registrace,
+hovory, fronta), **SMS** (dekódovaný žurnál, fronta retry, ruční odeslání),
+**Diagnostika** (tail logu, AT příkaz — `CUSBPIDSWITCH` blokován). Běží jako
+kontejner `webui` (čistá Python stdlib), s Asteriskem mluví přes AMI na
+localhostu. **Nikdy nevystavovat veřejně** — jen LAN/WireGuard.
+
 ## Struktura repa
 
 ```
