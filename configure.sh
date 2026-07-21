@@ -32,6 +32,8 @@ source .env
 : "${SIP_USER:?V .env chybí SIP_USER}"
 : "${SIP_PASSWORD:?V .env chybí SIP_PASSWORD}"
 : "${SIP_DOMAIN:?V .env chybí SIP_DOMAIN (doména/IP, na kterou je softphone registrovaný — viz .env.example)}"
+: "${AMI_PASSWORD:?V .env chybí AMI_PASSWORD (openssl rand -base64 24)}"
+: "${WEBUI_PASSWORD:?V .env chybí WEBUI_PASSWORD (openssl rand -base64 24)}"
 if ! [[ "${SIP_USER}" =~ ^[A-Za-z0-9_-]+$ ]]; then
   echo "CHYBA: SIP_USER smí obsahovat jen A-Za-z0-9_- (jde do názvů pjsip sekcí a dialplanu)." >&2
   exit 1
@@ -102,18 +104,20 @@ esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 SIP_USER_ESC="$(esc "${SIP_USER}")"
 SIP_PASSWORD_ESC="$(esc "${SIP_PASSWORD}")"
 SIP_DOMAIN_ESC="$(esc "${SIP_DOMAIN}")"
+AMI_PASSWORD_ESC="$(esc "${AMI_PASSWORD}")"
 for f in asterisk/*.conf; do
   base="$(basename "$f")"
   sed -e "s|\${SIP_USER}|${SIP_USER_ESC}|g" \
       -e "s|\${SIP_PASSWORD}|${SIP_PASSWORD_ESC}|g" \
       -e "s|\${SIP_DOMAIN}|${SIP_DOMAIN_ESC}|g" \
+      -e "s|\${AMI_PASSWORD}|${AMI_PASSWORD_ESC}|g" \
       "$f" > "${TARGET}/${base}"
 done
 
 touch "${MARKER}"   # render doběhl celý — od teď je konfigurace „hotová"
 
-# --- Datové adresáře (žurnál/fronta SMS, retry spool) --------------------------
-mkdir -p runtime/smsdata/queue runtime/spool
+# --- Datové adresáře (žurnál/fronta SMS, retry spool, log) ---------------------
+mkdir -p runtime/smsdata/queue runtime/spool runtime/astlog
 
 # --- Práva ---------------------------------------------------------------------
 # Asterisk v kontejneru neběží jako root a jeho UID neznáme předem — zkusíme ho
@@ -132,11 +136,11 @@ if [[ "${ast_uid}" =~ ^[0-9]+$ ]]; then
     chmod 755 "${TARGET}" && chmod 644 "${TARGET}"/*.conf
   fi
   # datové adresáře musí mít zapisovatelné asterisk v kontejneru
-  sudo chown -R "${ast_uid}" runtime/smsdata runtime/spool 2>/dev/null \
-    || chmod -R 777 runtime/smsdata runtime/spool
+  sudo chown -R "${ast_uid}" runtime/smsdata runtime/spool runtime/astlog 2>/dev/null \
+    || chmod -R 777 runtime/smsdata runtime/spool runtime/astlog
 else
   chmod 755 "${TARGET}" && chmod 644 "${TARGET}"/*.conf
-  chmod -R 777 runtime/smsdata runtime/spool   # fallback bez známého UID
+  chmod -R 777 runtime/smsdata runtime/spool runtime/astlog   # fallback bez známého UID
 fi
 
 echo "OK: konfigurace vygenerována do ${TARGET}."

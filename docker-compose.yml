@@ -30,3 +30,21 @@ services:
       - ./scripts:/usr/local/gsm2sip:ro          # sms-queue.sh (žurnál+retry)
       - ./runtime/smsdata:/var/lib/gsm2sip       # žurnál, fronta, smsdb (persistentní)
       - ./runtime/spool:/var/spool/asterisk/outgoing  # naplánované retry (call files)
+      - ./runtime/astlog:/var/log/asterisk       # messages.log pro web UI
+
+  webui:
+    build: ./webui
+    container_name: gsm2sip-webui
+    network_mode: host          # AMI na 127.0.0.1; UI poslouchá na :8090 (jen LAN/WG!)
+    restart: unless-stopped
+    depends_on:
+      - asterisk
+    environment:
+      TZ: Europe/Prague
+      AMI_PASSWORD: ${AMI_PASSWORD}
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD}
+      WEBUI_PORT: ${WEBUI_PORT:-8090}
+      SIP_USER: ${SIP_USER}
+    volumes:
+      - ./runtime/smsdata:/var/lib/gsm2sip:ro
+      - ./runtime/astlog:/var/log/asterisk:ro
