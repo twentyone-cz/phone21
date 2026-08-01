@@ -1,0 +1,91 @@
+#!/usr/sbin/nft -f
+#
+# GSM2SIP — firewall brány (nftables)
+#
+# Záměr: z internetu je vidět JEN WireGuard. Signalizace a média (SIP/RTP)
+# jsou dostupné výhradně z tunelu — nikdy z LAN, natož z veřejné IP.
+# Správa (SSH, web UI) je dostupná z LAN i z tunelu.
+#
+# Proč vlastní tabulka a ne /etc/nftables.conf: Docker si spravuje pravidla
+# přes iptables-nft v tabulce `ip filter`/`ip nat`. Kdyby se sem dal obvyklý
+# `flush ruleset`, smázlo by je to (a při startu v jiném pořadí než docker.service
+# by se to projevilo až rozbitou sítí kontejnerů). Vlastní tabulka `inet gsm2sip`
+# koexistuje: paket projde oběma, drop v kterékoli z nich znamená zahození.
+#
+# Nasazení a rollback: scripts/install-firewall.sh (nepouštět nft ručně —
+# skript kolem toho dělá pojistku proti odříznutí správy).
+
+# --- Parametry ---------------------------------------------------------------
+# MGMT_NET = síť, ze které se brána spravuje (SSH, web UI). Záměrně celá /24,
+# ne jediná IP: dev stroj má adresu z DHCP a přišpendlení na jednu IP je
+# nejběžnější způsob, jak se z brány vyzamknout.
+define MGMT_NET   = <IP>/24
+define WG_IF      = "wg0"
+define WG_PORT    = 51820
+define SIP_PORT   = 5060           # pjsip.conf: transport-tcp bind 0.0.0.0:5060
+define RTP_PORTS  = 10000-10100    # rtp.conf: rtpstart/rtpend
+define WEBUI_PORT = 8090           # .env WEBUI_PORT
+
+# Idempotence: tabulku nejdřív (případně) vyrob prázdnou, smaž a nadefinuj.
+# Bez toho by opakované načtení pravidla přidávalo, ne nahrazovalo.
+table inet gsm2sip {}
+delete table inet gsm2sip
+
+table inet gsm2sip {
+
+  chain input {
+    type filter hook input priority filter; policy drop;
+
+    # Stavové základy. `invalid drop` až za `established`, ať se neztrácejí
+    # legitimní ICMP chyby k navázaným spojením.
+    ct state established,related accept
+    ct state invalid drop
+    iif lo accept
+
+    # ICMP — diagnostika (ping) a nezbytné PMTU/ND. Bez icmpv6 přestane
+    # fungovat IPv6 sousedství, i když IPv6 aktivně nepoužíváme.
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
+
+    # DHCP klient. Obnova leasu chodí unicastem (pokryl by ji conntrack),
+    # ale prvotní nabídka po restartu ne — a bez leasu zmizí i správa.
+    udp sport 67 udp dport 68 accept
+    udp sport 547 udp dport 546 accept
+
+    # --- Jediné, co smí přijít z veřejné IP ------------------------------
+    # WireGuard: na paket bez platného klíče neodpoví, takže se port zvenčí
+    # tváří jako zavřený. Port forward na routeru míří sem a nikam jinam.
+    udp dport $WG_PORT accept
+
+    # --- Správa: LAN i tunel ---------------------------------------------
+    ip saddr $MGMT_NET tcp dport 22 accept
+    iifname $WG_IF tcp dport 22 accept
+
+    ip saddr $MGMT_NET tcp dport $WEBUI_PORT accept
+    iifname $WG_IF tcp dport $WEBUI_PORT accept
+
+    # --- Telefonie: výhradně z tunelu ------------------------------------
+    # Tohle je hlavní důvod, proč WireGuard končí až tady v LXC a ne na
+    # routeru: SIP se nikdy neobjeví v plaintextu na LAN a 5060 nemusí být
+    # otevřené vůči ostatním strojům v síti.
+    iifname $WG_IF tcp dport $SIP_PORT accept
+    iifname $WG_IF udp dport $SIP_PORT accept
+    iifname $WG_IF udp dport $RTP_PORTS accept
+
+    # AMI (5038) a postfix (25) poslouchají na 127.0.0.1 — kryje je `iif lo`.
+    # IAX2 (4569) nepoužíváme a je navíc vypnutý v modules.conf.
+
+    # Zahozené pakety zalogovat, ale s limitem (log je v dmesg / journalu).
+    limit rate 5/minute burst 5 packets \
+      log prefix "gsm2sip-fw-drop: " level info
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+
+    # Telefon je v tunelu kvůli bráně, ne kvůli přístupu do LAN — brána
+    # nemá být routerem do <IP>/24. Policy zůstává accept, aby se
+    # nerozbilo forwardování Dockeru, kdyby se někdy použil bridge network.
+    iifname $WG_IF oifname != $WG_IF drop
+  }
+}

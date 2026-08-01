@@ -210,6 +210,10 @@ Konfigurace v `runtime/asterisk/` (resp. `app-data`) update přežívá —
 - **SIP (5060/5061) nikdy na veřejnou IP.** Default je tunel (Tailscale/
   WireGuard); jediná výjimka je režim B s TLS + IP allowlistem. Nespoléhat
   na SIP ALG routeru (spíš škodí — na routeru vypnout).
+- **Firewall** (`scripts/install-firewall.sh`, nftables): z internetu je
+  vidět jen WireGuard, SIP/RTP jen z tunelu, SSH a web UI z LAN i tunelu.
+  Protože stack běží v `network_mode: host`, bez firewallu poslouchá SIP na
+  `0.0.0.0` a je dostupný z celé LAN. Detaily a rollback: `docs/lxc-deploy.md`.
 - Hesla jen v `.env` (chmod 600) a ve vygenerovaném `runtime/asterisk/`
   (640 + chown na UID asteriska v kontejneru; když UID nejde zjistit, fallback
   644 — viz configure.sh) — nikdy v gitu.
@@ -247,6 +251,10 @@ asterisk/                   # ŠABLONY konfigurace (tokeny ${SIP_USER}/${SIP_PAS
   pjsip.conf                #   transporty UDP/TCP (+TLS připraveno), 1 endpoint
   extensions.conf           #   dialplan oba směry + echo test 600 + SMS stub (F6)
   modules.conf, rtp.conf, logger.conf
+scripts/                    # pomocné skripty na bráně
+  sms-queue.sh              #   žurnál + retry fronta příchozích SMS
+  firewall.nft              #   nftables pravidla (vlastní tabulka inet gsm2sip)
+  install-firewall.sh       #   nasazení s rollback pojistkou proti odříznutí
 eddie-passthrough-test/     # Fáze 0.5 — test devices + host net (zdroj; publikuje
                             # se kopií do repa Eddie/umbrel-store)
 ```
