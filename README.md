@@ -233,9 +233,11 @@ Obnova = nakopírovat repo + tyto dva kusy, `sudo ./host-setup.sh`,
 ## Web UI
 
 `http://<IP-brány>:8090` (Basic auth, heslo `WEBUI_PASSWORD` z `.env`;
-uživatel libovolný). Tři záložky: **Stav** (modem, RSSI, SIP registrace,
+uživatel libovolný). Čtyři záložky: **Stav** (modem, RSSI, SIP registrace,
 hovory, fronta), **SMS** (dekódovaný žurnál, fronta retry, ruční odeslání),
-**Diagnostika** (tail logu, AT příkaz — `CUSBPIDSWITCH` blokován). Běží jako
+**Telefon** (QR s WireGuard configem pro telefon — endpoint se zadá v poli,
+config se čte z `runtime/wg/phone-wg.conf`), **Diagnostika** (tail logu,
+AT příkaz — `CUSBPIDSWITCH` blokován). Běží jako
 kontejner `webui` (čistá Python stdlib), s Asteriskem mluví přes AMI na
 localhostu. **Nikdy nevystavovat veřejně** — jen LAN/WireGuard.
 

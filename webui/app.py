@@ -10,7 +10,9 @@ import base64
 import html
 import json
 import os
+import re
 import socket
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -26,6 +28,8 @@ SIP_USER = os.environ.get("SIP_USER", "softphone")
 DATA_DIR = os.environ.get("GSM2SIP_DATA", "/var/lib/gsm2sip")
 LOG_FILE = os.environ.get("ASTERISK_LOG", "/var/log/asterisk/messages.log")
 DEVICE = os.environ.get("QUECTEL_DEVICE", "quectel0")
+WG_PEER_CONF = os.environ.get("WG_PEER_CONF", "/etc/wireguard-peer/phone-wg.conf")
+WG_ENDPOINT = os.environ.get("WG_ENDPOINT", "")  # předvyplnění, dá se přepsat v UI
 
 _ami_lock = threading.Lock()
 
@@ -157,6 +161,56 @@ def tail_log(n=120):
         return "(log %s neexistuje — zkontroluj logger.conf a volume)" % LOG_FILE
 
 
+ENDPOINT_RE = re.compile(r"^[A-Za-z0-9.:\[\]-]{3,80}$")
+
+
+def wg_peer_config(endpoint=""):
+    """Config telefonu s dosazeným Endpointem. Vrací (text, chyba).
+
+    Endpoint se nedrží v souboru: veřejná IP se mění a port se může lišit od
+    ListenPortu (na routeru je forward z jiného portu). Zadá se v UI nebo
+    předvyplní přes WG_ENDPOINT.
+    """
+    try:
+        with open(WG_PEER_CONF) as f:
+            conf = f.read()
+    except OSError as e:
+        return "", "Config telefonu nejde přečíst (%s): %s" % (WG_PEER_CONF, e)
+    ep = (endpoint or WG_ENDPOINT).strip()
+    if not ep:
+        return conf, "Chybí endpoint — QR by vedl na placeholder a tunel by nenavázal."
+    if not ENDPOINT_RE.match(ep):
+        return conf, "Endpoint smí být jen host:port (písmena, číslice, . : [] -)."
+    if ":" not in ep.rsplit("]", 1)[-1]:
+        return conf, "Endpoint musí obsahovat i port, např. 203.0.113.10:443."
+    out, seen = [], False
+    for ln in conf.splitlines():
+        if ln.strip().lower().startswith("endpoint"):
+            out.append("Endpoint = " + ep)
+            seen = True
+        else:
+            out.append(ln)
+    if not seen:
+        return conf, "V configu chybí řádek Endpoint — doplň ho do %s." % WG_PEER_CONF
+    return "\n".join(out) + "\n", ""
+
+
+def wg_qr_svg(text):
+    """QR jako inline SVG (qrencode). Vrací (svg, chyba)."""
+    try:
+        p = subprocess.run(
+            ["qrencode", "-t", "SVG", "-o", "-", "-m", "2", "-s", "5"],
+            input=text.encode(), capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", "qrencode selhal: %s" % e
+    if p.returncode != 0:
+        return "", "qrencode skončil s chybou: %s" % p.stderr.decode(errors="replace")
+    # XML prolog a DOCTYPE se do HTML nevkládají — inline SVG začíná až <svg>.
+    svg = p.stdout.decode(errors="replace")
+    i = svg.find("<svg")
+    return (svg[i:], "") if i >= 0 else ("", "qrencode nevrátil SVG")
+
+
 PAGE = """<!doctype html><html lang="cs"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>GSM2SIP</title><style>
@@ -174,8 +228,13 @@ input,textarea,button{{background:#222;color:#ddd;border:1px solid #444;border-r
 button{{background:#2a4;border:0;color:#fff;cursor:pointer;font-weight:600}}
 small{{color:#888}}
 h2{{color:#9c9;font-size:1rem;margin:1.2rem 0 .4rem}}
+.qr{{background:#fff;padding:12px;border-radius:8px;display:inline-block;
+     max-width:320px;line-height:0}}
+.qr svg{{display:block;width:100%;height:auto}}
+details{{margin:.8rem 0}}summary{{cursor:pointer;color:#9c9}}
 </style></head><body>
 <nav><a href="/" class="{act_status}">Stav</a><a href="/sms" class="{act_sms}">SMS</a>
+<a href="/phone" class="{act_phone}">Telefon</a>
 <a href="/diag" class="{act_diag}">Diagnostika</a></nav>
 <main>{body}</main>
 <footer style="padding:1rem;text-align:center"><small>GSM2SIP · jen LAN/WG · {now}</small></footer>
@@ -186,6 +245,7 @@ def render(active, body):
     return PAGE.format(
         act_status="act" if active == "status" else "",
         act_sms="act" if active == "sms" else "",
+        act_phone="act" if active == "phone" else "",
         act_diag="act" if active == "diag" else "",
         body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -239,6 +299,40 @@ def page_sms(sent_info=""):
         "<h2>Žurnál (nejnovější nahoře)</h2>"
         "<table><tr><th>čas</th><th>stav</th><th>od</th><th>text</th></tr>%s</table>"
     ) % (sent_info, qrows, jrows))
+
+
+def page_phone(endpoint=""):
+    conf, err = wg_peer_config(endpoint)
+    shown_ep = esc(endpoint or WG_ENDPOINT)
+    blocks = [
+        "<h2>WireGuard config pro telefon</h2>",
+        '<form class="inline" method="post" action="/phone">'
+        '<input name="endpoint" placeholder="verejna-ip:443" size="28" value="%s">'
+        "<button>Zobrazit QR</button></form>"
+        "<small>Endpoint = veřejná IP a port, na kterém je na routeru forward "
+        "na UDP 51820 brány.</small>" % shown_ep,
+    ]
+    if err:
+        blocks.append('<p class="bad">%s</p>' % esc(err))
+    else:
+        svg, qerr = wg_qr_svg(conf)
+        if qerr:
+            blocks.append('<p class="bad">%s</p>' % esc(qerr))
+        else:
+            blocks.append('<div class="qr">%s</div>' % svg)
+            blocks.append(
+                "<p><small>V appce WireGuard: <b>+</b> → <b>Skenovat z QR kódu</b>. "
+                "Pak Linphone: účet <b>%s@%s</b>, transport TCP.</small></p>"
+                % (esc(SIP_USER), esc(os.environ.get("SIP_DOMAIN", "10.6.0.1"))))
+    blocks.append(
+        '<p class="warn">QR i text níž obsahují <b>privátní klíč telefonu</b> — '
+        "kdo je zachytí, dostane se do tunelu. Stránka je za heslem a jen na "
+        "LAN/WG; po naskenování ji zavři a nesdílej screenshot.</p>")
+    if conf:
+        blocks.append(
+            "<details><summary>Zobrazit config textem (ruční import)</summary>"
+            "<pre>%s</pre></details>" % esc(conf))
+    return render("phone", "".join(blocks))
 
 
 def page_diag(at_info=""):
@@ -295,6 +389,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_status())
         if self.path == "/sms":
             return self._html(page_sms())
+        if self.path == "/phone":
+            return self._html(page_phone())
         if self.path == "/diag":
             return self._html(page_diag())
         self._html("<p>404</p>", 404)
@@ -320,6 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 info = '<p class="bad">AMI chyba: %s</p>' % esc(e)
             return self._html(page_sms(info))
+        if self.path == "/phone":
+            # POST, ať se endpoint (a tím i QR s klíčem) neukládá do historie
+            # prohlížeče ani do logu jako query string.
+            return self._html(page_phone(form.get("endpoint", "")))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
             if not cmd.upper().startswith("AT") or "CUSBPIDSWITCH" in cmd.upper():
