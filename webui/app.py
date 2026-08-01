@@ -405,10 +405,16 @@ class Handler(BaseHTTPRequestHandler):
             if not to or not text:
                 return self._html(page_sms('<p class="bad">Chybí číslo nebo text.</p>'))
             try:
+                # Destination = cíl technologie, To = telefonní číslo. Driver si
+                # číslo bere z ast_msg_get_to(), tedy z To — ne z Destination
+                # a už vůbec ne z Variable. Dřív tu bylo To="mobile:quectel0"
+                # a číslo ve Variable MESSAGE(to): driver pak sestavil PDU
+                # s nulovou délkou cílového čísla, modem na něj neodpověděl
+                # a zatuhl tak, že přestal reagovat i na holé AT.
                 resp = ami_call(lambda a: a.action(
-                    "MessageSend", To="mobile:" + DEVICE, From=SIP_USER,
-                    Base64Body=base64.b64encode(text.encode()).decode(),
-                    Variable="MESSAGE(to)=" + to))
+                    "MessageSend", Destination="mobile:" + DEVICE, To=to,
+                    From=SIP_USER,
+                    Base64Body=base64.b64encode(text.encode()).decode()))
                 ok = "Success" in resp.get("Response", "")
                 info = ('<p class="ok">SMS předána modemu (%s).</p>'
                         if ok else '<p class="bad">Odeslání selhalo: %s</p>') \
