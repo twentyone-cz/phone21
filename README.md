@@ -257,6 +257,9 @@ scripts/                    # pomocné skripty na bráně
   sms-queue.sh              #   žurnál + retry fronta příchozích SMS
   firewall.nft              #   nftables pravidla (vlastní tabulka inet gsm2sip)
   install-firewall.sh       #   nasazení s rollback pojistkou proti odříznutí
+  watchdog.sh               #   detekce zaseknutého driveru → restart kontejneru
+  install-watchdog.sh       #   systemd timer pro watchdog
+docker/patches/             # lokální patche chan_quectel (upstream archivovaný)
 eddie-passthrough-test/     # Fáze 0.5 — test devices + host net (zdroj; publikuje
                             # se kopií do repa Eddie/umbrel-store)
 ```

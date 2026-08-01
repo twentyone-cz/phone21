@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+#
+# GSM2SIP — watchdog modemu.
+#
+# Driver se umí zaseknout tak, že přestane odpovídat i na holé AT a točí se
+# v restartní smyčce (`Not connected` / `Stopping by start request`). Sám se
+# z toho nedostane, spraví to až restart kontejneru. Tenhle skript to pozná
+# a restart udělá za nás.
+#
+# Spouští se ze systemd timeru po ~30 s (scripts/install-watchdog.sh).
+#
+#   watchdog.sh            # jeden běh: zkontroluj a případně zasáhni
+#   watchdog.sh --check    # jen ohlas stav, nikdy nerestartuj (pro ladění)
+#
+# Rozhodovací pravidla, a proč:
+#  - Zásah až po FAIL_THRESHOLD po sobě jdoucích neúspěších. Po startu
+#    kontejneru je zařízení chvíli `Not connected` legitimně; bez tohohle by
+#    watchdog restartoval bránu donekonečna.
+#  - Mezi restarty COOLDOWN. Když je modem fyzicky pryč (odpojený kabel),
+#    žádný restart nepomůže a nemá cenu bránu mlátit každou půlminutu.
+#  - Zastavený kontejner se NErestartuje. `docker stop` je vědomý úkon
+#    (údržba, ladění) a watchdog do něj nemá co mluvit.
+
+set -uo pipefail
+
+CONTAINER="${CONTAINER:-asterisk}"
+DEVICE="${QUECTEL_DEVICE:-quectel0}"
+STATE_DIR="${STATE_DIR:-/opt/Gsm2Sip/runtime/smsdata}"
+LOG="${STATE_DIR}/watchdog.log"
+FAILS_FILE=/run/gsm2sip-watchdog.fails
+LAST_RESTART_FILE=/run/gsm2sip-watchdog.last-restart
+FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"
+COOLDOWN="${COOLDOWN:-600}"
+LOG_KEEP="${LOG_KEEP:-200}"
+
+DRY=0
+[[ "${1:-}" == "--check" ]] && DRY=1
+
+log() {
+  local msg="$1"
+  local line
+  line="$(date '+%Y-%m-%dT%H:%M:%S%:z') ${msg}"
+  echo "${line}"                       # → journal (systemd)
+  mkdir -p "${STATE_DIR}" 2>/dev/null
+  echo "${line}" >> "${LOG}" 2>/dev/null
+  # log držíme krátký — čte ho i web UI a nemá cenu, aby rostl bez omezení
+  if [[ -f "${LOG}" ]] && (( $(wc -l < "${LOG}") > LOG_KEEP * 2 )); then
+    tail -n "${LOG_KEEP}" "${LOG}" > "${LOG}.tmp" && mv "${LOG}.tmp" "${LOG}"
+  fi
+}
+
+read_num() { local f="$1"; [[ -r "$f" ]] && cat "$f" 2>/dev/null || echo 0; }
+
+fails=$(read_num "${FAILS_FILE}")
+
+# --- Je vůbec co hlídat? -----------------------------------------------------
+running=$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null || echo false)
+if [[ "${running}" != "true" ]]; then
+  echo 0 > "${FAILS_FILE}"
+  exit 0
+fi
+
+# --- Stav zařízení -----------------------------------------------------------
+# `quectel show device state` je spolehlivější než `show devices`: stav je tam
+# na vlastním řádku, takže se neplete víceslovné "Not connected" se sloupci.
+state=$(timeout 15 docker exec "${CONTAINER}" \
+          asterisk -rx "quectel show device state ${DEVICE}" 2>/dev/null \
+        | sed -n 's/^ *State *: *//p' | head -1)
+
+healthy=0
+case "${state}" in
+  "")                 reason="Asterisk neodpovídá na CLI" ;;
+  "Not connected"*)   reason="zařízení hlásí: ${state}" ;;
+  *)                  healthy=1 ;;
+esac
+
+if (( healthy )); then
+  if (( fails > 0 )); then
+    log "OK: ${DEVICE} je zpátky (${state}), počítadlo nulováno po ${fails} neúspěších"
+  fi
+  echo 0 > "${FAILS_FILE}"
+  (( DRY )) && echo "stav: ${state} — zdravé"
+  exit 0
+fi
+
+fails=$(( fails + 1 ))
+echo "${fails}" > "${FAILS_FILE}"
+
+if (( DRY )); then
+  echo "stav: ${state:-<žádná odpověď>} — NEZDRAVÉ (${reason}); neúspěchů v řadě: ${fails}/${FAIL_THRESHOLD}"
+  exit 1
+fi
+
+if (( fails < FAIL_THRESHOLD )); then
+  log "VAROVÁNÍ: ${reason} (${fails}/${FAIL_THRESHOLD}) — zatím čekám"
+  exit 0
+fi
+
+# --- Cooldown ----------------------------------------------------------------
+now=$(date +%s)
+last=$(read_num "${LAST_RESTART_FILE}")
+if (( last > 0 && now - last < COOLDOWN )); then
+  log "CHYBA: ${reason}, ale poslední restart byl před $(( now - last )) s (cooldown ${COOLDOWN} s) — nezasahuji. Zkontroluj modem fyzicky (kabel/napájení)."
+  exit 0
+fi
+
+# --- Zásah -------------------------------------------------------------------
+log "ZÁSAH: ${reason} po ${fails} kontrolách → restartuji kontejner ${CONTAINER}"
+if docker restart "${CONTAINER}" >/dev/null 2>&1; then
+  echo "${now}" > "${LAST_RESTART_FILE}"
+  echo 0 > "${FAILS_FILE}"
+  log "ZÁSAH: restart proveden. Pozor: restart maže SIP registrace z paměti, "\
+"telefon se musí znovu přihlásit (příchozí SMS mezitím chytá retry fronta)."
+else
+  log "ZÁSAH SELHAL: docker restart ${CONTAINER} skončil chybou"
+fi

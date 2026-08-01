@@ -153,6 +153,17 @@ def read_queue():
     return items
 
 
+def read_watchdog(n=5):
+    """Poslední záznamy watchdogu. Restarty brány jsou jinak neviditelné —
+    telefon se prostě odregistruje a není poznat proč."""
+    try:
+        with open(os.path.join(DATA_DIR, "watchdog.log"), "rb") as f:
+            return [ln.decode(errors="replace").rstrip()
+                    for ln in f.readlines()[-n:]]
+    except FileNotFoundError:
+        return []
+
+
 def tail_log(n=120):
     try:
         with open(LOG_FILE, "rb") as f:
@@ -262,14 +273,18 @@ def page_status():
     q = read_queue()
     qbadge = ('<span class="warn">%d SMS čeká ve frontě</span>' % len(q)) if q \
         else '<span class="ok">fronta prázdná</span>'
+    wd = read_watchdog()
+    wdblock = ('<pre>%s</pre>' % esc("\n".join(wd))) if wd else \
+        '<p><span class="ok">watchdog zatím nikdy nezasáhl</span></p>'
     return render("status", (
         "<h2>Modem</h2><pre>%s</pre>"
         "<h2>Detail zařízení</h2><pre>%s</pre>"
         "<h2>SIP registrace softphonu</h2><pre>%s</pre>"
         "<h2>Hovory</h2><pre>%s</pre>"
         "<h2>SMS fronta</h2><p>%s</p>"
+        "<h2>Watchdog modemu</h2>%s"
         '<p><button onclick="location.reload()">Obnovit</button></p>'
-    ) % (esc(dev), esc(state), esc(contacts), esc(chans), qbadge))
+    ) % (esc(dev), esc(state), esc(contacts), esc(chans), qbadge, wdblock))
 
 
 def page_sms(sent_info=""):
