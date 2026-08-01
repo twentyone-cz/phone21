@@ -16,10 +16,15 @@
 # skript kolem toho dělá pojistku proti odříznutí správy).
 
 # --- Parametry ---------------------------------------------------------------
-# MGMT_NET = síť, ze které se brána spravuje (SSH, web UI). Záměrně celá /24,
-# ne jediná IP: dev stroj má adresu z DHCP a přišpendlení na jednu IP je
-# nejběžnější způsob, jak se z brány vyzamknout.
-define MGMT_NET   = <IP>/24
+# MGMT_NET = sítě, ze kterých se brána spravuje (SSH, web UI). Množina, dá se
+# rozšířit o další rozsahy. Záměrně celé podsítě, ne jednotlivé IP: stroje mají
+# adresy z DHCP a přišpendlení na jednu IP je nejběžnější způsob, jak se
+# z brány vyzamknout.
+#
+# Pozor na past: eth0 brány má z DHCP masku /24, ale LAN je ve skutečnosti /20
+# (<IP> – <IP>). Odvozovat rozsah z masky rozhraní by tu
+# odřízlo většinu sítě.
+define MGMT_NET   = { 192.168.1.0/24 }
 define WG_IF      = "wg0"
 define WG_PORT    = 51820
 define SIP_PORT   = 5060           # pjsip.conf: transport-tcp bind 0.0.0.0:5060
