@@ -1,0 +1,21 @@
+--- a/src/msg_tech.c
++++ b/src/msg_tech.c
+@@ -71,14 +71,14 @@
+     char* dest = ast_strdupa(to);
+     strsep(&dest, ":");
+ 
+-    if (interní API(msg)) {
++    const char* const msg_to   = ast_msg_get_to(msg);
++    const char* const msg_body = ast_msg_get_body(msg);
++
++    if (ast_strlen_zero(msg_to)) {
+         ast_log(LOG_ERROR, "Destination number not specified\n");
+         return -1;
+     }
+ 
+-    const char* const msg_to   = ast_msg_get_to(msg);
+-    const char* const msg_body = ast_msg_get_body(msg);
+-
+     int validity = parse_validity(NULL);
+     int report   = parse_report_flag(NULL);
+     parse_msg_vars(msg, &validity, &report);

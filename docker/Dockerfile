@@ -17,6 +17,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # plný clone včetně tagů — CMake si verzi bere z `git describe`
 RUN git clone https://github.com/RoEdAl/asterisk-chan-quectel /src
 WORKDIR /src
+# Lokální patche. Upstream je archivovaný (2024), takže je neseme u sebe.
+# 0001: msg_send() testoval interní API(), což se ptá PŘÍCHOZÍCH
+#   handlerů, jestli zprávu umí směrovat do dialplanu — pro odchozí směr to
+#   nedává smysl a podmínka byla navíc obrácená. Důsledek: SMS z chatu (přišla
+#   přes kontext [messages], takže destinaci má) driver zahodil s „Destination
+#   number not specified", zatímco SMS z AMI (bez dialplanové destinace) prošla
+#   do větve, kde je ast_msg_get_to() prázdné → PDU s nulovou délkou příjemce,
+#   na které modem zatuhl. Nově se testuje přímo prázdné číslo příjemce.
+COPY patches/ /patches/
+RUN git apply --verbose /patches/*.patch
 # preferuj Ninja, fallback na make; RelWithDebInfo kvůli použitelným backtrace.
 # -Bsymbolic je KRITICKÉ: interní symboly modulu (channel_new, cpvt_alloc, ...)
 # nejsou static a volají se přes PLT. V procesu Asterisku je i cizí knihovna,
