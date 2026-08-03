@@ -8,6 +8,8 @@
 #   sms-queue.sh journal <status> <b64-json>            zápis do žurnálu
 #   sms-queue.sh enqueue <b64-json> <retryN> [origts]   naplánovat (další) pokus
 #   sms-queue.sh done <qid>                             úklid po úspěšném retry
+#   sms-queue.sh missed <číslo-E.164>                   notifikace zmeškaného
+#                                                       hovoru do chatu
 #
 # Backoff: 60s * 2^n, strop 10 minut. Give-up podle stáří zprávy (TTL 48 h
 # od přijetí) — pak zůstává v žurnálu se stavem failed-ttl. Pokus o doručení
@@ -67,6 +69,23 @@ case "${1:-}" in
   done)
     qid="$(printf '%s' "$2" | tr -cd '0-9')"
     rm -f "$QDIR/$qid.b64"
+    ;;
+
+  missed)
+    # Zmeškaný hovor při offline telefonu. JSON se skládá tady, ne v dialplanu
+    # (Set() neumí hodnotu s čárkami), a má stejný tvar jako příchozí SMS
+    # {from, ts, msg} — doručení, retry, žurnál i web UI ho zpracují beze
+    # změny; "type" navíc pro budoucí rozlišení. Zpráva jde „od volajícího",
+    # takže v Linphone přistane ve vlákně jeho čísla. Čas v textu je čas
+    # POKUSU o hovor (TZ kontejneru), doručí se se zpožděním až po registraci.
+    num="$(printf '%s' "$2" | tr -cd '+0-9')"
+    [ -n "$num" ] || exit 0
+    now="$(date +%s)"
+    hhmm="$(date +%H:%M)"
+    json="$(printf '{"from":"%s","ts":%s,"msg":"Zmeškaný hovor v %s","type":"missed"}' "$num" "$now" "$hhmm")"
+    b64="$(printf '%s' "$json" | base64 | tr -d '\n')"
+    journal "missed-call" "$b64"
+    "$0" enqueue "$b64" 0 "$now"
     ;;
 
   *)

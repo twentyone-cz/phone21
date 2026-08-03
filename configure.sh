@@ -34,6 +34,12 @@ source .env
 : "${SIP_DOMAIN:?V .env chybí SIP_DOMAIN (doména/IP, na kterou je softphone registrovaný — viz .env.example)}"
 : "${AMI_PASSWORD:?V .env chybí AMI_PASSWORD (openssl rand -base64 24)}"
 : "${WEBUI_PASSWORD:?V .env chybí WEBUI_PASSWORD (openssl rand -base64 24)}"
+# Default, ať starší .env bez COUNTRY_CODE dál fungují:
+: "${COUNTRY_CODE:=420}"
+if ! [[ "${COUNTRY_CODE}" =~ ^[0-9]{1,3}$ ]]; then
+  echo "CHYBA: COUNTRY_CODE musí být 1–3 číslice (bez +), např. 420." >&2
+  exit 1
+fi
 if ! [[ "${SIP_USER}" =~ ^[A-Za-z0-9_-]+$ ]]; then
   echo "CHYBA: SIP_USER smí obsahovat jen A-Za-z0-9_- (jde do názvů pjsip sekcí a dialplanu)." >&2
   exit 1
@@ -97,20 +103,23 @@ else
 fi
 
 # --- Render šablon -------------------------------------------------------------
-# Nahrazuje se VÝHRADNĚ ${SIP_USER} a ${SIP_PASSWORD} (sed, literal tokeny) —
-# asteriskové proměnné (${EXTEN}, ${CALLERID(...)}) zůstávají netknuté.
+# Nahrazují se VÝHRADNĚ tokeny SIP_USER, SIP_PASSWORD, SIP_DOMAIN, AMI_PASSWORD
+# a COUNTRY_CODE (sed, literal tokeny) — asteriskové proměnné (${EXTEN},
+# ${CALLERID(...)}) zůstávají netknuté.
 # Escapování znaků, které mají v sed replacement význam (\, &, |):
 esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 SIP_USER_ESC="$(esc "${SIP_USER}")"
 SIP_PASSWORD_ESC="$(esc "${SIP_PASSWORD}")"
 SIP_DOMAIN_ESC="$(esc "${SIP_DOMAIN}")"
 AMI_PASSWORD_ESC="$(esc "${AMI_PASSWORD}")"
+COUNTRY_CODE_ESC="$(esc "${COUNTRY_CODE}")"
 for f in asterisk/*.conf; do
   base="$(basename "$f")"
   sed -e "s|\${SIP_USER}|${SIP_USER_ESC}|g" \
       -e "s|\${SIP_PASSWORD}|${SIP_PASSWORD_ESC}|g" \
       -e "s|\${SIP_DOMAIN}|${SIP_DOMAIN_ESC}|g" \
       -e "s|\${AMI_PASSWORD}|${AMI_PASSWORD_ESC}|g" \
+      -e "s|\${COUNTRY_CODE}|${COUNTRY_CODE_ESC}|g" \
       "$f" > "${TARGET}/${base}"
 done
 

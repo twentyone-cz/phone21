@@ -1,3 +1,4 @@
 # tajemství a vygenerovaná runtime konfigurace — nikdy do gitu
 .env
 runtime/
+__pycache__/

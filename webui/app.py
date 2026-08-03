@@ -28,6 +28,7 @@ SIP_USER = os.environ.get("SIP_USER", "softphone")
 DATA_DIR = os.environ.get("GSM2SIP_DATA", "/var/lib/gsm2sip")
 LOG_FILE = os.environ.get("ASTERISK_LOG", "/var/log/asterisk/messages.log")
 DEVICE = os.environ.get("QUECTEL_DEVICE", "quectel0")
+COUNTRY_CODE = os.environ.get("COUNTRY_CODE", "420")
 WG_PEER_CONF = os.environ.get("WG_PEER_CONF", "/etc/wireguard-peer/phone-wg.conf")
 WG_ENDPOINT = os.environ.get("WG_ENDPOINT", "")  # předvyplnění, dá se přepsat v UI
 
@@ -102,6 +103,40 @@ def cli(cmd):
         return ami_call(lambda a: a.command(cmd))
     except Exception as e:  # UI nesmí spadnout kvůli AMI výpadku
         return "CHYBA AMI: %s" % e
+
+
+def normalize_msisdn(num, cc=None):
+    """Normalizace čísla na E.164 (+420...) — STEJNÁ pravidla jako subrutina
+    [number-normalize] v asterisk/extensions.conf; při změně upravit obě
+    místa! Krátká čísla a alfanumerická ID vrací beze změny."""
+    cc = cc or COUNTRY_CODE
+    n = num.strip()
+    if not n or n.startswith("+"):
+        return n
+    if not n.isdigit():
+        return num
+    if n.startswith("00") and len(n) > 4:
+        return "+" + n[2:]
+    if n.startswith(cc) and len(n) == len(cc) + 9:
+        return "+" + n
+    if len(n) == 9:
+        return "+" + cc + n
+    return num
+
+
+MISSED_MODES = ("ring", "announce")
+
+
+def get_missed_mode():
+    """Aktuální chování k volajícímu při offline telefonu (AstDB přes AMI).
+    Prázdný/nečitelný klíč = default ring."""
+    out = cli("database get gsm2sip missed_mode")
+    for ln in out.splitlines():
+        if ln.startswith("Value:"):
+            val = ln.split(":", 1)[1].strip()
+            if val in MISSED_MODES:
+                return val
+    return "ring"
 
 
 def read_journal(limit=200):
@@ -265,7 +300,7 @@ def esc(s):
     return html.escape(str(s), quote=True)
 
 
-def page_status():
+def page_status(mode_info=""):
     dev = cli("quectel show devices")
     state = cli("quectel show device state " + DEVICE)
     contacts = cli("pjsip show contacts")
@@ -276,15 +311,30 @@ def page_status():
     wd = read_watchdog()
     wdblock = ('<pre>%s</pre>' % esc("\n".join(wd))) if wd else \
         '<p><span class="ok">watchdog zatím nikdy nezasáhl</span></p>'
+    mode = get_missed_mode()
+    modeblock = (
+        '%s<form class="inline" method="post" action="/missed-mode">'
+        '<label><input type="radio" name="mode" value="ring"%s> '
+        "vyzvánět naprázdno (~30 s, hovor se nepřijme, volajícímu se neúčtuje)</label>"
+        '<label><input type="radio" name="mode" value="announce"%s> '
+        "hláska nedostupnosti (hovor se přijme — volajícímu se může účtovat)</label>"
+        "<button>Uložit</button></form>"
+        "<small>Zmeškaný hovor při offline telefonu vždy pošle notifikaci do "
+        "chatu (od čísla volajícího), doručí se po znovupřipojení.</small>"
+    ) % (mode_info,
+         ' checked' if mode == "ring" else '',
+         ' checked' if mode == "announce" else '')
     return render("status", (
         "<h2>Modem</h2><pre>%s</pre>"
         "<h2>Detail zařízení</h2><pre>%s</pre>"
         "<h2>SIP registrace softphonu</h2><pre>%s</pre>"
         "<h2>Hovory</h2><pre>%s</pre>"
         "<h2>SMS fronta</h2><p>%s</p>"
+        "<h2>Nedostupný telefon — chování k volajícímu</h2>%s"
         "<h2>Watchdog modemu</h2>%s"
         '<p><button onclick="location.reload()">Obnovit</button></p>'
-    ) % (esc(dev), esc(state), esc(contacts), esc(chans), qbadge, wdblock))
+    ) % (esc(dev), esc(state), esc(contacts), esc(chans), qbadge, modeblock,
+         wdblock))
 
 
 def page_sms(sent_info=""):
@@ -337,7 +387,7 @@ def page_phone(endpoint=""):
             blocks.append('<div class="qr">%s</div>' % svg)
             blocks.append(
                 "<p><small>V appce WireGuard: <b>+</b> → <b>Skenovat z QR kódu</b>. "
-                "Pak Linphone: účet <b>%s@%s</b>, transport TCP.</small></p>"
+                "Pak Linphone: účet <b>%s@%s</b>, transport UDP.</small></p>"
                 % (esc(SIP_USER), esc(os.environ.get("SIP_DOMAIN", "10.6.0.1"))))
     blocks.append(
         '<p class="warn">QR i text níž obsahují <b>privátní klíč telefonu</b> — '
@@ -414,8 +464,21 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return self._deny()
         form = self._form()
+        if self.path == "/missed-mode":
+            mode = form.get("mode", "")
+            if mode not in MISSED_MODES:
+                return self._html(page_status('<p class="bad">Neplatný režim.</p>'))
+            # Enum konstanta, žádný user input do CLI. Dialplan čte
+            # ${DB(gsm2sip/missed_mode)} — AstDB leží na persistentním volume
+            # (astdbdir v asterisk.conf), takže volba přežije i recreate.
+            cli("database put gsm2sip missed_mode " + mode)
+            saved = get_missed_mode()
+            info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
+                else '<p class="bad">Zápis se nepotvrdil — zkontroluj AMI/AstDB.</p>'
+            return self._html(page_status(info))
         if self.path == "/sms/send":
             to = "".join(c for c in form.get("to", "") if c in "+0123456789")
+            to = normalize_msisdn(to)
             text = form.get("text", "")[:459]
             if not to or not text:
                 return self._html(page_sms('<p class="bad">Chybí číslo nebo text.</p>'))

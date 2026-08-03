@@ -46,6 +46,7 @@ services:
       WEBUI_PORT: ${WEBUI_PORT:-8090}
       SIP_USER: ${SIP_USER}
       SIP_DOMAIN: ${SIP_DOMAIN}
+      COUNTRY_CODE: ${COUNTRY_CODE:-420}  # normalizace čísel na E.164 (viz dialplan)
       WG_ENDPOINT: ${WG_ENDPOINT:-}   # předvyplnění pole na záložce Telefon
     volumes:
       - ./runtime/smsdata:/var/lib/gsm2sip:ro

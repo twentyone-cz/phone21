@@ -127,7 +127,7 @@ daného operátora zdokumentovat sem, až budou ověřené na místě.
 sudo docker exec -it asterisk asterisk -rx 'pjsip show endpoints'
 ```
 Linphone nejdřív **na domácí LAN**: SIP účet `SIP_USER@<IP-Pi>`, transport
-**TCP** (UDP je v pjsip.conf záměrně vypnutý), heslo z `.env`.
+**UDP** (primární; TCP je fallback pro velké requesty), heslo z `.env`.
 **Gate:** endpoint ukazuje registrovaný kontakt.
 
 Rychlý test zvuku SIP větve bez SIM: zavolat **600** (echo test).
@@ -164,9 +164,10 @@ v `quectel.conf`, případně `AT+CPCMFRM`).
    rozhraní utun100, IP 10.44.170.108): první volba je připojit telefon
    invitem do téhle mesh sítě. Ověřit klienta na GrapheneOS a spolehlivost
    na pozadí; fallback je **Tailscale** z Umbrel storu (nebo WireGuard).
-2. Linphone: SIP účet na **tailscale IP Pi**, transport **TCP** (ne UDP —
-   delší NAT keepalive, méně probouzení rádia), registration expiry např.
-   3600 s, zapnout background mode / foreground service + výjimka
+2. Linphone: SIP účet na **tunelové IP brány**, transport **UDP** — TCP se
+   v praxi ukázal křehčí (doze zabíjí socket → flapování registrace, viz
+   docs/telefon-gos.md „SIP transport a spolehlivost doručení"), registration
+   expiry 600 s, zapnout background mode / foreground service + výjimka
    z optimalizace baterie. Na GrapheneOS spolehlivé, cena je baterie.
 3. **Na veřejné IP není otevřený žádný SIP port** — žádný port forward.
    Push notifikace v tomto režimu **nefungují a fungovat nemůžou** (SIPIS
@@ -234,7 +235,9 @@ Obnova = nakopírovat repo + tyto dva kusy, `sudo ./host-setup.sh`,
 
 `http://<IP-brány>:8090` (Basic auth, heslo `WEBUI_PASSWORD` z `.env`;
 uživatel libovolný). Čtyři záložky: **Stav** (modem, RSSI, SIP registrace,
-hovory, fronta), **SMS** (dekódovaný žurnál, fronta retry, ruční odeslání),
+hovory, fronta, přepínač chování k volajícímu při offline telefonu —
+vyzvánět naprázdno / hláska; drží se v AstDB na persistentním volume),
+**SMS** (dekódovaný žurnál, fronta retry, ruční odeslání),
 **Telefon** (QR s WireGuard configem pro telefon — endpoint se zadá v poli,
 config se čte z `runtime/wg/phone-wg.conf`), **Diagnostika** (tail logu,
 AT příkaz — `CUSBPIDSWITCH` blokován). Běží jako
@@ -250,8 +253,11 @@ configure.sh                # šablony + .env -> runtime konfigurace (jednorázo
 host-setup.sh               # jediný host zásah: ModemManager + ověření modemu
 asterisk/                   # ŠABLONY konfigurace (tokeny ${SIP_USER}/${SIP_PASSWORD})
   quectel.conf              #   modem: data=ttyUSB2, audio=ttyUSB4 (PCM), žádné USB audio
-  pjsip.conf                #   transporty UDP/TCP (+TLS připraveno), 1 endpoint
-  extensions.conf           #   dialplan oba směry + echo test 600 + SMS stub (F6)
+  pjsip.conf                #   transporty UDP (primární) + TCP fallback, 1 endpoint
+  extensions.conf           #   dialplan oba směry, normalizace na E.164
+                            #   (COUNTRY_CODE z .env), zmeškané hovory do chatu;
+                            #   testy: 600 echo, *981-983 chat, *984 normalizace,
+                            #   *985 zmeškaný hovor, *99<číslo> SMS
   modules.conf, rtp.conf, logger.conf
 scripts/                    # pomocné skripty na bráně
   sms-queue.sh              #   žurnál + retry fronta příchozích SMS
