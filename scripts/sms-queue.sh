@@ -58,7 +58,11 @@ case "${1:-}" in
     # (2026-08-03 shodila celé LXC). Podadresář .tmp inotify nevidí (watch
     # není rekurzivní); mv na stejném fs je atomický a spool uvidí až
     # inotify s hotovým budoucím mtime — ten pbx_spool plánuje korektně.
+    # 777, protože skript běží střídavě pod root (docker exec, testy) a pod
+    # asterisk (System() z dialplanu) — bez toho adresář založený rootem
+    # zablokuje zápisy asteriska a call file tiše nevznikne.
     mkdir -p "$SPOOL/.tmp" 2>/dev/null || true
+    chmod 777 "$SPOOL/.tmp" 2>/dev/null || true
     tmp="$SPOOL/.tmp/$qid"
     {
       echo "Channel: Local/smsretry@quectel-incoming"
@@ -72,7 +76,13 @@ case "${1:-}" in
     } > "$tmp"
     touch -d "@$when" "$tmp"
     mv "$tmp" "$SPOOL/$qid.call"   # rename na stejném fs = atomické
-    journal "queued-retry$(( n + 1 ))-in${delay}s" "$b64"
+    if [ -e "$SPOOL/$qid.call" ]; then
+      journal "queued-retry$(( n + 1 ))-in${delay}s" "$b64"
+    else
+      # Zápis call file selhal (práva/disk) — bez tohohle záznamu by zpráva
+      # osiřela v queue/ a nikdo by se to nedozvěděl (viditelné ve web UI).
+      journal "failed-spool-write" "$b64"
+    fi
     ;;
 
   done)
