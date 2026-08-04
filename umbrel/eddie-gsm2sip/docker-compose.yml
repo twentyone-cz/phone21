@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: it-one.cz/21/gsm2sip-asterisk:0.9.1
+    image: it-one.cz/21/gsm2sip-asterisk:0.9.1@sha256:42e9d3dac15d307c574ba74e227077f5baaff379a0830e9b6182ecedad83fe5b
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
     environment:
@@ -43,7 +43,7 @@ services:
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk
 
   webui:
-    image: it-one.cz/21/gsm2sip-webui:0.9.0@sha256:eb4da41f88da5db2d391acde113bd5cc55da123397e7d17b16df49e92e2861b4
+    image: it-one.cz/21/gsm2sip-webui:0.9.1@sha256:71c078728479f167217ec8ccff93a3eb6caa4493195700156a53813f6c2df170
     restart: on-failure
     environment:
       TZ: ${TZ:-Europe/Prague}
