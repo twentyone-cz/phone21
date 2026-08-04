@@ -122,8 +122,10 @@ AT+CEREG?      ; 0,1 nebo 0,5 = registrován
 **Gate: SPLNĚNA — VoLTE FUNGUJE (2026-08-04).** IMS registrace `registered`,
 voice/SMS over IMS `available`, hovor zůstává na LTE (ověřeno `+CPSI?` během
 aktivního hovoru). Byly to TŘI zámky najednou a musely povolit všechny:
-1. **MBN profil profil** místo autoselectnutého profil
-   (aktivace za horka přes QMI PDC, trvale drží `gsm2sip-mbn.service`);
+1. **MBN profil profil** místo autoselectnutého profil —
+   automaticky ho vybírá a drží `scripts/mbn-profile.sh` (tabulka
+   operátor→profil, `MBN_PROFILE` v `.env`; instalace systemd služby:
+   `sudo scripts/install-mbn.sh`);
 2. **QMI přístup z LXC** (`/dev/cdc-wdm0` passthrough) pro správu profilů
    a diagnostiku (`--imsa-get-ims-registration-status`);
 3. **provisioning linky u operátora** — TMCZ aktivuje VoLTE na lince až po
@@ -151,7 +153,8 @@ Zjištění a stav (modem firmware…M22, testovací T-Mobile CZ SIM):
 - aktivován **profil** (matka TMCZ) — přepnutí funguje za horka
   (`--pdc-deactivate-config` ROW + `--pdc-activate-config` DT, UTAPNCFG se
   změní); po resetu modemu ho autoselect vrací, drží ho proto systemd
-  oneshot **`gsm2sip-mbn.service`** (`scripts/mbn-dt-activate.sh`),
+  oneshot **`gsm2sip-mbn.service`** (`scripts/mbn-profile.sh auto` — výběr
+  z tabulky operátor→profil dle home network SIM, `MBN_PROFILE` v `.env`),
 - `+CIREG`/`+CAVIMS`/`+CVDP` firmware nemá; nedokumentované IMS příkazy:
   `+IMSREGDB`, `+IMSSIPCFG`, `+IMSSMSCFG`, `+UTAPNCFG` (viz `AT+CLAC`).
 
@@ -308,6 +311,8 @@ scripts/                    # pomocné skripty na bráně
   install-firewall.sh       #   nasazení s rollback pojistkou proti odříznutí
   watchdog.sh               #   detekce zaseknutého driveru → restart kontejneru
   install-watchdog.sh       #   systemd timer pro watchdog
+  mbn-profile.sh            #   MBN carrier profil dle operátora SIM (VoLTE)
+  install-mbn.sh            #   systemd oneshot pro mbn-profile.sh auto
 docker/patches/             # lokální patche chan_quectel (upstream archivovaný)
 eddie-passthrough-test/     # Fáze 0.5 — test devices + host net (zdroj; publikuje
                             # se kopií do repa Eddie/umbrel-store)
