@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: it-one.cz/21/gsm2sip-asterisk:0.9.0
+    image: it-one.cz/21/gsm2sip-asterisk:0.9.0@sha256:9df970bad98a2e870da607efbe74ca8e98c9e09ba1bc7a973ee27388b9bb64ba
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
     environment:
@@ -38,7 +38,7 @@ services:
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk
 
   webui:
-    image: it-one.cz/21/gsm2sip-webui:0.9.0
+    image: it-one.cz/21/gsm2sip-webui:0.9.0@sha256:eb4da41f88da5db2d391acde113bd5cc55da123397e7d17b16df49e92e2861b4
     restart: on-failure
     environment:
       TZ: ${TZ:-Europe/Prague}
@@ -60,7 +60,7 @@ services:
     # Privátní síť telefon↔brána. Oficiální tailscale klient s login serverem
     # CockScale (žádná Tailscale Inc. infrastruktura, telemetrie vypnutá).
     # Čeká na auth klíč, který uživatel vloží ve webui (záložka Síť).
-    image: tailscale/tailscale:v1.86.2
+    image: tailscale/tailscale:v1.86.2@sha256:241d9518b7e0b6e533dbd0117fcea15acb4174249210837f52b71615949ce9d2
     restart: on-failure
     network_mode: host
     cap_add:
