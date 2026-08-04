@@ -74,14 +74,11 @@ render() {
         "$f" > "/etc/asterisk/$base"
   done
   # víc permit položek: čárkami oddělený seznam → samostatné řádky
-  if [[ "$ami_permit" == *,* ]]; then
-    python3 - "$ami_permit" <<'PYEOF' > /tmp/permits || true
-import sys
-print("\n".join("permit = " + p.strip() for p in sys.argv[1].split(",")))
-PYEOF
-    sed -i -e "/^permit = /{r /tmp/permits
-d}" /etc/asterisk/manager.conf
-  fi
+  # (čisté awk — python v image není; funguje i pro jedinou hodnotu)
+  awk -v perms="$ami_permit" '
+    /^permit = / { n = split(perms, a, ","); for (i = 1; i <= n; i++) print "permit = " a[i]; next }
+    { print }' /etc/asterisk/manager.conf > /tmp/manager.conf.new \
+    && mv /tmp/manager.conf.new /etc/asterisk/manager.conf
   mkdir -p "$DATA/queue" "$DATA/ts"
   chown -R asterisk "$DATA" /etc/asterisk 2>/dev/null || true
   log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
