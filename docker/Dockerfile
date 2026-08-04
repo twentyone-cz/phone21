@@ -25,7 +25,8 @@ WORKDIR /src
 #   number not specified", zatímco SMS z AMI (bez dialplanové destinace) prošla
 #   do větve, kde je ast_msg_get_to() prázdné → PDU s nulovou délkou příjemce,
 #   na které modem zatuhl. Nově se testuje přímo prázdné číslo příjemce.
-COPY patches/ /patches/
+# cesty relativně ke kořeni repa (build context: ., dockerfile: docker/Dockerfile)
+COPY docker/patches/ /patches/
 RUN git apply --verbose /patches/*.patch
 # preferuj Ninja, fallback na make; RelWithDebInfo kvůli použitelným backtrace.
 # -Bsymbolic je KRITICKÉ: interní symboly modulu (channel_new, cpvt_alloc, ...)
