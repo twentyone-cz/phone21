@@ -36,6 +36,10 @@ source .env
 : "${WEBUI_PASSWORD:?V .env chybí WEBUI_PASSWORD (openssl rand -base64 24)}"
 # Default, ať starší .env bez COUNTRY_CODE dál fungují:
 : "${COUNTRY_CODE:=420}"
+# AMI bind/ACL — na LXC vždy jen localhost (Umbrel režim si to renderuje
+# entrypoint kontejneru sám, tudy to neprochází):
+: "${AMI_BIND:=127.0.0.1}"
+: "${AMI_PERMIT:=127.0.0.1/255.255.255.255}"
 if ! [[ "${COUNTRY_CODE}" =~ ^[0-9]{1,3}$ ]]; then
   echo "CHYBA: COUNTRY_CODE musí být 1–3 číslice (bez +), např. 420." >&2
   exit 1
@@ -113,6 +117,8 @@ SIP_PASSWORD_ESC="$(esc "${SIP_PASSWORD}")"
 SIP_DOMAIN_ESC="$(esc "${SIP_DOMAIN}")"
 AMI_PASSWORD_ESC="$(esc "${AMI_PASSWORD}")"
 COUNTRY_CODE_ESC="$(esc "${COUNTRY_CODE}")"
+AMI_BIND_ESC="$(esc "${AMI_BIND}")"
+AMI_PERMIT_ESC="$(esc "${AMI_PERMIT}")"
 for f in asterisk/*.conf; do
   base="$(basename "$f")"
   sed -e "s|\${SIP_USER}|${SIP_USER_ESC}|g" \
@@ -120,6 +126,8 @@ for f in asterisk/*.conf; do
       -e "s|\${SIP_DOMAIN}|${SIP_DOMAIN_ESC}|g" \
       -e "s|\${AMI_PASSWORD}|${AMI_PASSWORD_ESC}|g" \
       -e "s|\${COUNTRY_CODE}|${COUNTRY_CODE_ESC}|g" \
+      -e "s|\${AMI_BIND}|${AMI_BIND_ESC}|g" \
+      -e "s|\${AMI_PERMIT}|${AMI_PERMIT_ESC}|g" \
       "$f" > "${TARGET}/${base}"
 done
 

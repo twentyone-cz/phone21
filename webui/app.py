@@ -31,6 +31,29 @@ DEVICE = os.environ.get("QUECTEL_DEVICE", "quectel0")
 COUNTRY_CODE = os.environ.get("COUNTRY_CODE", "420")
 WG_PEER_CONF = os.environ.get("WG_PEER_CONF", "/etc/wireguard-peer/phone-wg.conf")
 WG_ENDPOINT = os.environ.get("WG_ENDPOINT", "")  # předvyplnění, dá se přepsat v UI
+# Umbrel režim: tajemství generuje entrypoint asterisku do sdíleného souboru
+# (AMI_PASSWORD env pak není nastavené) a privátní síť se ovládá přes TS_DIR.
+AMI_SECRETS_FILE = os.environ.get("AMI_SECRETS_FILE", "")
+TS_DIR = os.environ.get("TS_DIR", "")
+
+
+def read_secrets():
+    """SIP/AMI tajemství ze sdíleného volume (generuje entrypoint asterisku)."""
+    d = {}
+    if AMI_SECRETS_FILE:
+        try:
+            with open(AMI_SECRETS_FILE) as f:
+                for ln in f:
+                    if "=" in ln:
+                        k, v = ln.strip().split("=", 1)
+                        d[k] = v
+        except OSError:
+            pass
+    return d
+
+
+def ami_password():
+    return AMI_PASSWORD or read_secrets().get("AMI_PASSWORD", "")
 
 _ami_lock = threading.Lock()
 
@@ -46,7 +69,7 @@ class Ami:
         self.sock = socket.create_connection((AMI_HOST, AMI_PORT), timeout=8)
         self.buf = b""
         self._read_until(b"\r\n")  # banner
-        resp = self.action("Login", Username=AMI_USER, Secret=AMI_PASSWORD)
+        resp = self.action("Login", Username=AMI_USER, Secret=ami_password())
         if "Success" not in resp.get("Response", ""):
             raise AmiError("AMI login selhal: %s" % resp.get("Message"))
 
@@ -280,7 +303,7 @@ h2{{color:#9c9;font-size:1rem;margin:1.2rem 0 .4rem}}
 details{{margin:.8rem 0}}summary{{cursor:pointer;color:#9c9}}
 </style></head><body>
 <nav><a href="/" class="{act_status}">Stav</a><a href="/sms" class="{act_sms}">SMS</a>
-<a href="/phone" class="{act_phone}">Telefon</a>
+<a href="/phone" class="{act_phone}">Telefon</a>{net_tab}
 <a href="/diag" class="{act_diag}">Diagnostika</a></nav>
 <main>{body}</main>
 <footer style="padding:1rem;text-align:center"><small>GSM2SIP · jen LAN/WG · {now}</small></footer>
@@ -288,11 +311,14 @@ details{{margin:.8rem 0}}summary{{cursor:pointer;color:#9c9}}
 
 
 def render(active, body):
+    net_tab = ('<a href="/net" class="%s">Síť</a>' %
+               ("act" if active == "net" else "")) if TS_DIR else ""
     return PAGE.format(
         act_status="act" if active == "status" else "",
         act_sms="act" if active == "sms" else "",
         act_phone="act" if active == "phone" else "",
         act_diag="act" if active == "diag" else "",
+        net_tab=net_tab,
         body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
@@ -400,6 +426,42 @@ def page_phone(endpoint=""):
     return render("phone", "".join(blocks))
 
 
+def page_net(info=""):
+    """Privátní síť (Umbrel): stav připojení, vložení auth klíče, SIP údaje."""
+    ip = ""
+    try:
+        ip = open(os.path.join(TS_DIR, "ip")).read().strip()
+    except OSError:
+        pass
+    pending = os.path.exists(os.path.join(TS_DIR, "authkey"))
+    sec = read_secrets()
+    blocks = [info, "<h2>Privátní síť</h2>"]
+    if ip:
+        blocks.append('<p><span class="ok">Brána je připojená — adresa v privátní '
+                      "síti: <b>%s</b></span></p>" % esc(ip))
+    elif pending:
+        blocks.append('<p><span class="warn">Klíč vložen, připojuji…</span> '
+                      "<button onclick=\"location.reload()\">Obnovit</button></p>")
+    else:
+        blocks.append(
+            "<p>Brána zatím není v privátní síti. Vlož auth klíč "
+            "z dashboardu služby (Přidat zařízení):</p>"
+            '<form class="inline" method="post" action="/net/authkey">'
+            '<input name="authkey" placeholder="hskey-auth-..." size="40" required>'
+            "<button>Připojit</button></form>")
+    if ip and sec.get("SIP_USER"):
+        blocks.append(
+            "<h2>Nastavení softphonu (Linphone)</h2>"
+            "<table><tr><th>Uživatel</th><td>%s</td></tr>"
+            "<tr><th>Heslo</th><td><code>%s</code></td></tr>"
+            "<tr><th>Doména/server</th><td>%s</td></tr>"
+            "<tr><th>Transport</th><td>UDP</td></tr></table>"
+            "<small>Telefon musí být ve stejné privátní síti "
+            "(aplikace privátní sítě + tvůj klíč zařízení).</small>"
+            % (esc(sec["SIP_USER"]), esc(sec.get("SIP_PASSWORD", "")), esc(ip)))
+    return render("net", "".join(blocks))
+
+
 def page_diag(at_info=""):
     return render("diag", (
         "%s<h2>AT příkaz</h2>"
@@ -456,6 +518,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_sms())
         if self.path == "/phone":
             return self._html(page_phone())
+        if self.path == "/net" and TS_DIR:
+            return self._html(page_net())
         if self.path == "/diag":
             return self._html(page_diag())
         self._html("<p>404</p>", 404)
@@ -504,6 +568,20 @@ class Handler(BaseHTTPRequestHandler):
             # POST, ať se endpoint (a tím i QR s klíčem) neukládá do historie
             # prohlížeče ani do logu jako query string.
             return self._html(page_phone(form.get("endpoint", "")))
+        if self.path == "/net/authkey" and TS_DIR:
+            key = form.get("authkey", "").strip()
+            # auth klíče: base64-like tokeny (headscale hskey-auth-…)
+            if not re.match(r"^[A-Za-z0-9_-]{20,200}$", key):
+                return self._html(page_net('<p class="bad">Tohle nevypadá jako auth klíč.</p>'))
+            try:
+                path = os.path.join(TS_DIR, "authkey")
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    f.write(key)
+                info = '<p class="ok">Klíč uložen — připojuji do privátní sítě.</p>'
+            except OSError as e:
+                info = '<p class="bad">Nejde uložit klíč: %s</p>' % esc(e)
+            return self._html(page_net(info))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
             if not cmd.upper().startswith("AT") or "CUSBPIDSWITCH" in cmd.upper():

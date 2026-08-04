@@ -1,0 +1,38 @@
+manifestVersion: 1
+id: eddie-gsm2sip
+category: networking
+name: GSM2SIP
+version: "0.9.0"
+tagline: Vlastní GSM brána — hovory a SMS z tvé SIM kamkoli přes SIP
+description: >-
+  GSM2SIP promění USB LTE modem se SIM kartou v soukromou telefonní bránu:
+  hovory a SMS z tvého čísla dostaneš do softphonu (Linphone) na mobilu,
+  ať jsi kdekoli — přes privátní šifrovanou síť, bez veřejné IP a bez
+  port forwardu. Zmeškané hovory chodí jako zpráva do chatu, SMS obousměrně,
+  podpora VoLTE (automatická volba carrier profilu modemu).
+
+
+  Vyžaduje USB LTE modem výrobce modem (nebo kompatibilní se
+  chan_quectel) a SIM kartu. Pro spojení s telefonem na cestách je potřeba
+  klíč privátní sítě (viz dokumentace — služba CockScale, platba Lightning,
+  žádná registrace). Na lokální síti funguje i bez ní.
+
+
+  GSM2SIP turns a USB LTE modem with your SIM card into a private phone
+  gateway: calls and SMS from your number reach a softphone anywhere via
+  a private encrypted network — no public IP, no port forwarding needed.
+developer: Eddie
+website: https://it-one.cz/git/Eddie/Gsm2Sip
+dependencies: []
+repo: https://it-one.cz/git/Eddie/Gsm2Sip
+support: https://it-one.cz/git/Eddie/Gsm2Sip/issues
+port: 8090
+gallery: []
+path: ""
+defaultUsername: ""
+deterministicPassword: true
+submitter: Eddie
+submission: https://it-one.cz/git/Eddie/umbrel-store
+releaseNotes: >-
+  První vydání pro Umbrel: kompletní brána (hovory, SMS, zmeškané hovory,
+  VoLTE) se selfkonfigurací a volitelným připojením do privátní sítě.

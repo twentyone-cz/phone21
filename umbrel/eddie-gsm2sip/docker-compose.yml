@@ -1,0 +1,94 @@
+version: "3.7"
+
+# GSM2SIP pro Umbrel — asterisk (host síť, USB modem) + webui (bridge,
+# za app_proxy) + tailnet sidecar (privátní síť telefon↔brána, login server
+# CockScale). Obrazy jsou multi-arch (amd64+arm64) z it-one.cz registry —
+# tagy aktualizuje umbrel/build-images.sh, před publikací připnout digestem.
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: eddie-gsm2sip_webui_1
+      APP_PORT: 8090
+
+  asterisk:
+    image: it-one.cz/eddie/gsm2sip-asterisk:0.9.0
+    restart: on-failure
+    network_mode: host            # RTP rozsah portů + SIP na tailnet IP
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      GSM2SIP_SELFCONFIG: "1"     # render konfigurace při každém startu
+      SUPERVISE: "1"              # restart procesu po pádu/watchdogu
+      WATCHDOG_INTERNAL: "1"      # hlídání modemu (Umbrel nemá host systemd)
+      MBN_INTERNAL: "1"           # VoLTE carrier profil (viz mbn-profile.sh)
+      COUNTRY_CODE: "420"
+      # AMI: webui běží v bridge síti appky → bind všude, ale ACL pouští jen
+      # localhost a interní Umbrel subnety (deny 0.0.0.0/0 je v šabloně):
+      AMI_BIND: 0.0.0.0
+      AMI_PERMIT: "127.0.0.1/255.255.255.255,10.21.0.0/255.255.0.0"
+    group_add:
+      - "20"                      # dialout
+    devices:
+      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if02-port0:/dev/ttyUSB2"
+      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0:/dev/ttyUSB4"
+      - "/dev/cdc-wdm0:/dev/cdc-wdm0"   # QMI: VoLTE MBN profil (volitelné)
+    volumes:
+      - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip
+      - ${APP_DATA_DIR}/data/spool:/var/spool/asterisk/outgoing
+      - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk
+
+  webui:
+    image: it-one.cz/eddie/gsm2sip-webui:0.9.0
+    restart: on-failure
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      WEBUI_PASSWORD: ${APP_PASSWORD}
+      WEBUI_PORT: 8090
+      AMI_HOST: host.docker.internal
+      # AMI_PASSWORD nezná compose (generuje ho asterisk kontejner) — webui
+      # si ho přečte ze sdíleného /var/lib/gsm2sip/secrets.env:
+      AMI_SECRETS_FILE: /var/lib/gsm2sip/secrets.env
+      TS_DIR: /var/lib/gsm2sip/ts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip:ro
+      - ${APP_DATA_DIR}/data/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk:ro
+
+  tailnet:
+    # Privátní síť telefon↔brána. Oficiální tailscale klient s login serverem
+    # CockScale (žádná Tailscale Inc. infrastruktura, telemetrie vypnutá).
+    # Čeká na auth klíč, který uživatel vloží ve webui (záložka Síť).
+    image: tailscale/tailscale:v1.86.2
+    restart: on-failure
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_NO_LOGS_NO_SUPPORT: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      COCKSCALE_URL: ${COCKSCALE_URL:-https://coord.it-one.cz}
+    volumes:
+      - ${APP_DATA_DIR}/data/ts-state:/var/lib/tailscale
+      - ${APP_DATA_DIR}/data/smsdata/ts:/gsm2sip-ts
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # počkat na auth klíč z webui, pak up na CockScale login server;
+        # tailnet IP zapsat pro asterisk (SIP_DOMAIN) a webui (zobrazení)
+        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        # kernel TUN (host síť + NET_ADMIN): host dostane rozhraní tailscale0,
+        # takže SIP/RTP asterisku je dosažitelný na tailnet IP brány
+        tailscaled --state=/var/lib/tailscale/tailscaled.state &
+        sleep 3
+        if [ -s /gsm2sip-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        fi
+        while true; do
+          ip="$$(tailscale ip -4 2>/dev/null | head -1)"
+          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          sleep 60
+        done

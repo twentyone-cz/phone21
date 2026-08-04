@@ -14,7 +14,11 @@ services:
     #   sudo docker compose build
     # Fallback na původní image: ASTERISK_IMAGE v .env (viz .env.example).
     image: ${ASTERISK_IMAGE:-gsm2sip-asterisk:local}
-    build: ./docker
+    # context = kořen repa: Dockerfile peče i asterisk/ šablony a scripts/
+    # (selfkonfigurace pro Umbrel; LXC režim se nemění — viz entrypoint.sh)
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     container_name: asterisk
     network_mode: host          # RTP = široký rozsah UDP portů, žádný port mapping
     restart: unless-stopped
