@@ -119,8 +119,31 @@ AT+CVOLTE?     ; VoLTE — u firmwaru 2021 často vypnutá, bez ní LTE hovor ne
 AT+COPS?       ; operátor
 AT+CEREG?      ; 0,1 nebo 0,5 = registrován
 ```
-**Gate:** registrace v LTE + aktivní VoLTE. Přesné příkazy zapnutí VoLTE pro
-daného operátora zdokumentovat sem, až budou ověřené na místě.
+**Gate:** registrace v LTE splněna. **VoLTE: prošetřeno 2026-08-04, na této
+kombinaci NEFUNGUJE a neopravíme to z AT příkazů** — hovory jedou spolehlivě
+přes CSFB do 2G (T-Mobile CZ 2G běží, vypnutí se čeká nejdřív ~2028).
+
+Zjištění (modem firmware…M22, testovací T-Mobile CZ SIM):
+- firmware VoLTE zapnuté (`AT+VOLTESETTING?` → 1), síť **IMS PDN přidělila**
+  (`AT+CGACT?` → cid 2 „ims" aktivní, `AT+CGPADDR` → IPv4+IPv6 adresa),
+- ale IMS SIP registrace neproběhne: v LTE-only režimu (`AT+CNMP=38`) se
+  odchozí hovor vůbec nesestaví (žádné `+CLCC`) → modem neumí hlas přes IMS
+  postavit; v auto režimu každý hovor = CSFB (`+CPSI?` během hovoru: GSM
+  EGSM 900, `+CNSMOD: 1`),
+- příčina: chybí Qualcomm carrier profil (MBN) pro T-Mobile CZ — UT/XCAP
+  konfigurace hlásí AT&T default `nxtgenphone` (`AT+UTAPNCFG?`); náprava by
+  vyžadovala nahrání MBN přes DIAG port (QPST, změna USB kompozice =
+  zakázané `CUSBPIDSWITCH` teritorium) + entitlement IMEI u operátora —
+  obojí mimo rozumný rozsah,
+- `+CIREG`/`+CAVIMS`/`+CVDP` tento firmware nepodporuje; IMS příkazy jsou
+  `+IMSREGDB`, `+IMSSIPCFG`, `+IMSSMSCFG`, `+UTAPNCFG` (viz `AT+CLAC`).
+
+Kdyby VoLTE bylo v budoucnu potřeba (vypínání 2G): (a) ověřit provisioning
+SIM v běžném telefonu, (b) zvážit modem s carrier profily pro EU operátory
+(např. Quectel EG25-G, ověřený VoLTE v PinePhone komunitě). Diagnostika se
+dělá přes druhý AT port `/dev/ttyUSB3` z LXC (`./at.sh 'AT+…' /dev/ttyUSB3`)
+— nedrží ho chan_quectel; pozor, `AT+CNMP` přepnutí vyhodí driver (nutný
+`docker restart asterisk`).
 
 ### Fáze 3 — SIP endpoint
 ```bash
