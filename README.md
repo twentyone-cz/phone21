@@ -119,9 +119,17 @@ AT+CVOLTE?     ; VoLTE — u firmwaru 2021 často vypnutá, bez ní LTE hovor ne
 AT+COPS?       ; operátor
 AT+CEREG?      ; 0,1 nebo 0,5 = registrován
 ```
-**Gate:** registrace v LTE splněna. **VoLTE: rozpracováno (2026-08-04)** —
-hovory zatím jedou přes CSFB do 2G; blok je zúžen na IMS SIP registraci,
-poslední podezřelý je provisioning testovací SIM (ověřuje se v telefonu).
+**Gate: SPLNĚNA — VoLTE FUNGUJE (2026-08-04).** IMS registrace `registered`,
+voice/SMS over IMS `available`, hovor zůstává na LTE (ověřeno `+CPSI?` během
+aktivního hovoru). Byly to TŘI zámky najednou a musely povolit všechny:
+1. **MBN profil profil** místo autoselectnutého profil
+   (aktivace za horka přes QMI PDC, trvale drží `gsm2sip-mbn.service`);
+2. **QMI přístup z LXC** (`/dev/cdc-wdm0` passthrough) pro správu profilů
+   a diagnostiku (`--imsa-get-ims-registration-status`);
+3. **provisioning linky u operátora** — TMCZ aktivuje VoLTE na lince až po
+   prvním připojení známého VoLTE telefonu; testovací SIM nikdy v telefonu
+   nebyla → vložit SIM do telefonu, zapnout VoLTE, zavolat, vrátit do
+   modemu (pozor: výměna SIM = přepojit USB modemu + reboot LXC).
 
 Zjištění a stav (modem firmware…M22, testovací T-Mobile CZ SIM):
 - firmware VoLTE zapnuté (`AT+VOLTESETTING?` → 1), síť IMS PDN přiděluje
