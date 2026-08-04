@@ -435,6 +435,7 @@ def page_net(info=""):
         pass
     pending = os.path.exists(os.path.join(TS_DIR, "authkey"))
     sec = read_secrets()
+    dash = os.environ.get("NET_DASHBOARD_URL", "https://cockscale.twentyone.cz")
     blocks = [info, "<h2>Privátní síť</h2>"]
     if ip:
         blocks.append('<p><span class="ok">Brána je připojená — adresa v privátní '
@@ -442,13 +443,17 @@ def page_net(info=""):
     elif pending:
         blocks.append('<p><span class="warn">Klíč vložen, připojuji…</span> '
                       "<button onclick=\"location.reload()\">Obnovit</button></p>")
-    else:
-        blocks.append(
-            "<p>Brána zatím není v privátní síti. Vlož auth klíč "
-            "z dashboardu služby (Přidat zařízení):</p>"
-            '<form class="inline" method="post" action="/net/authkey">'
-            '<input name="authkey" placeholder="hskey-auth-..." size="40" required>'
-            "<button>Připojit</button></form>")
+    # Formulář je dostupný VŽDY (ne jen při prvním setupu): klíč platí 24 h,
+    # zobrazí se jen jednou, a po 90 dnech neplacení je potřeba nový.
+    blocks.append(
+        "<p>%s auth klíč z <a href=\"%s\" target=\"_blank\">dashboardu "
+        "privátní sítě</a> (Přidat zařízení; klíč platí 24 h a zobrazí se "
+        "jen jednou):</p>"
+        '<form class="inline" method="post" action="/net/authkey">'
+        '<input name="authkey" placeholder="hskey-auth-..." size="40" required>'
+        "<button>Připojit</button></form>"
+        % ("Nové připojení / obnova po expiraci — vlož" if ip else
+           "Brána zatím není v privátní síti. Vlož", esc(dash)))
     if ip and sec.get("SIP_USER"):
         blocks.append(
             "<h2>Nastavení softphonu (Linphone)</h2>"

@@ -1,0 +1,52 @@
+# GSM2SIP — overlay: připojení brány do privátní sítě CockScale (fáze D).
+#
+# Použití (LXC produkce):
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#
+# Auth klíč se vkládá ve webui (záložka Síť) — vygenerovaný na
+# https://cockscale.twentyone.cz (Přidat zařízení, platí 24 h, zobrazí se
+# jen jednou). Sidecar na klíč počká, připojí se a tailnet IP brány zapisuje
+# do runtime/smsdata/ts/ip (webui ji zobrazí; .env SIP_DOMAIN se pak přepne
+# na tuto IP: ./configure.sh --force && docker restart asterisk).
+#
+# TS_NO_LOGS_NO_SUPPORT je POVINNÉ — oficiální klient jinak streamuje
+# diagnostiku spojení na log.tailscale.io i proti headscale (issue #2793).
+
+services:
+  webui:
+    environment:
+      TS_DIR: /var/lib/gsm2sip/ts
+      NET_DASHBOARD_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
+    volumes:
+      - ./runtime/smsdata/ts:/var/lib/gsm2sip/ts:rw
+
+  tailnet:
+    image: tailscale/tailscale:v1.86.2
+    container_name: gsm2sip-tailnet
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_NO_LOGS_NO_SUPPORT: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
+    volumes:
+      - ./runtime/ts-state:/var/lib/tailscale
+      - ./runtime/smsdata/ts:/gsm2sip-ts
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        tailscaled --state=/var/lib/tailscale/tailscaled.state &
+        sleep 3
+        if [ -s /gsm2sip-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        fi
+        while true; do
+          ip="$$(tailscale ip -4 2>/dev/null | head -1)"
+          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          sleep 60
+        done

@@ -134,7 +134,7 @@ done
 touch "${MARKER}"   # render doběhl celý — od teď je konfigurace „hotová"
 
 # --- Datové adresáře (žurnál/fronta SMS, retry spool, log) ---------------------
-mkdir -p runtime/smsdata/queue runtime/spool runtime/astlog
+mkdir -p runtime/smsdata/queue runtime/smsdata/ts runtime/spool runtime/astlog
 
 # --- Práva ---------------------------------------------------------------------
 # Asterisk v kontejneru neběží jako root a jeho UID neznáme předem — zkusíme ho

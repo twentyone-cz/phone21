@@ -25,7 +25,10 @@
 # (<IP> – <IP>). Odvozovat rozsah z masky rozhraní by tu
 # odřízlo většinu sítě.
 define MGMT_NET   = { 192.168.1.0/24 }
-define WG_IF      = "wg0"
+# Tunelová rozhraní: během migrace na CockScale (tailscale0) jede dočasně
+# i staré wg0; po dokončení migrace z množiny wg0 vypadne a s ním i WG_PORT
+# pravidlo níže (WireGuard se ruší bez náhrady, rozhodnutí 2026-08-04).
+define TUN_IFS    = { "wg0", "tailscale0" }
 define WG_PORT    = 51820
 define SIP_PORT   = 5060           # pjsip.conf: transport-tcp bind 0.0.0.0:5060
 define RTP_PORTS  = 10000-10100    # rtp.conf: rtpstart/rtpend
@@ -64,18 +67,18 @@ table inet gsm2sip {
 
     # --- Správa: LAN i tunel ---------------------------------------------
     ip saddr $MGMT_NET tcp dport 22 accept
-    iifname $WG_IF tcp dport 22 accept
+    iifname $TUN_IFS tcp dport 22 accept
 
     ip saddr $MGMT_NET tcp dport $WEBUI_PORT accept
-    iifname $WG_IF tcp dport $WEBUI_PORT accept
+    iifname $TUN_IFS tcp dport $WEBUI_PORT accept
 
     # --- Telefonie: výhradně z tunelu ------------------------------------
     # Tohle je hlavní důvod, proč WireGuard končí až tady v LXC a ne na
     # routeru: SIP se nikdy neobjeví v plaintextu na LAN a 5060 nemusí být
     # otevřené vůči ostatním strojům v síti.
-    iifname $WG_IF tcp dport $SIP_PORT accept
-    iifname $WG_IF udp dport $SIP_PORT accept
-    iifname $WG_IF udp dport $RTP_PORTS accept
+    iifname $TUN_IFS tcp dport $SIP_PORT accept
+    iifname $TUN_IFS udp dport $SIP_PORT accept
+    iifname $TUN_IFS udp dport $RTP_PORTS accept
 
     # AMI (5038) a postfix (25) poslouchají na 127.0.0.1 — kryje je `iif lo`.
     # IAX2 (4569) nepoužíváme a je navíc vypnutý v modules.conf.
@@ -91,6 +94,6 @@ table inet gsm2sip {
     # Telefon je v tunelu kvůli bráně, ne kvůli přístupu do LAN — brána
     # nemá být routerem do <IP>/24. Policy zůstává accept, aby se
     # nerozbilo forwardování Dockeru, kdyby se někdy použil bridge network.
-    iifname $WG_IF oifname != $WG_IF drop
+    iifname $TUN_IFS oifname != $TUN_IFS drop
   }
 }

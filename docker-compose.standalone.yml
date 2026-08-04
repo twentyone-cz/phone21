@@ -78,7 +78,7 @@ services:
     environment:
       TS_NO_LOGS_NO_SUPPORT: "true"
       TS_STATE_DIR: /var/lib/tailscale
-      COCKSCALE_URL: ${COCKSCALE_URL:-https://coord.it-one.cz}
+      COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
     volumes:
       - ./data/ts-state:/var/lib/tailscale
       - ./data/smsdata/ts:/gsm2sip-ts
