@@ -32,6 +32,10 @@ COUNTRY_CODE = os.environ.get("COUNTRY_CODE", "420")
 # (AMI_PASSWORD env pak není nastavené) a privátní síť se ovládá přes TS_DIR.
 AMI_SECRETS_FILE = os.environ.get("AMI_SECRETS_FILE", "")
 TS_DIR = os.environ.get("TS_DIR", "")
+# UI režim: "expert" = technické záložky (Docker/LXC default),
+# "gui" = spotřebitelský dashboard (Umbrel appka) s technikou pod Pokročilé.
+UI_MODE = os.environ.get("UI_MODE", "expert")
+GUI = UI_MODE == "gui"
 
 
 def read_secrets():
@@ -227,48 +231,146 @@ def tail_log(n=120):
         return "(log %s neexistuje — zkontroluj logger.conf a volume)" % LOG_FILE
 
 
+# Barvy: expert = zelený terminálový vzhled, gui = jednadvacet oranžová.
+ACCENT = "#F7931A" if GUI else "#9c9"
+NAVBG = "#1a1409" if GUI else "#1b2a1b"
+BTN = "#F7931A" if GUI else "#2a4"
+BTNFG = "#111" if GUI else "#fff"
+
 PAGE = """<!doctype html><html lang="cs"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GSM2SIP</title><style>
+<title>{brand_plain}</title><style>
 body{{font-family:system-ui,sans-serif;margin:0;background:#111;color:#ddd}}
-nav{{background:#1b2a1b;padding:.6rem 1rem}}nav a{{color:#9c9;margin-right:1rem;text-decoration:none;font-weight:600}}
-nav a.act{{color:#fff;border-bottom:2px solid #6b6}}
+nav{{background:%(navbg)s;padding:.6rem 1rem}}
+nav .brand{{color:%(acc)s;font-weight:400;margin-right:1.4rem}}
+nav .brand b{{font-weight:800}}
+nav a{{color:%(acc)s;margin-right:1rem;text-decoration:none;font-weight:600}}
+nav a.act{{color:#fff;border-bottom:2px solid %(acc)s}}
 main{{padding:1rem;max-width:1100px;margin:auto}}
 pre{{background:#000;padding:.8rem;border-radius:6px;overflow-x:auto;font-size:.85rem;line-height:1.35}}
-table{{border-collapse:collapse;width:100%;font-size:.9rem}}
+table{{border-collapse:collapse;width:100%%;font-size:.9rem}}
 td,th{{border-bottom:1px solid #333;padding:.35rem .5rem;text-align:left;vertical-align:top}}
-th{{color:#9c9}}tr:hover{{background:#1a1a1a}}
+th{{color:%(acc)s}}tr:hover{{background:#1a1a1a}}
 .ok{{color:#7d7}}.bad{{color:#e77}}.warn{{color:#dc8}}
 form.inline{{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}}
 input,textarea,button{{background:#222;color:#ddd;border:1px solid #444;border-radius:4px;padding:.45rem}}
-button{{background:#2a4;border:0;color:#fff;cursor:pointer;font-weight:600}}
+button{{background:%(btn)s;border:0;color:%(btnfg)s;cursor:pointer;font-weight:700}}
 small{{color:#888}}
-h2{{color:#9c9;font-size:1rem;margin:1.2rem 0 .4rem}}
-.qr{{background:#fff;padding:12px;border-radius:8px;display:inline-block;
-     max-width:320px;line-height:0}}
-.qr svg{{display:block;width:100%;height:auto}}
-details{{margin:.8rem 0}}summary{{cursor:pointer;color:#9c9}}
+h2{{color:%(acc)s;font-size:1rem;margin:1.2rem 0 .4rem}}
+.tiles{{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin:1rem 0}}
+.tile{{background:#191919;border:1px solid #2a2a2a;border-radius:10px;padding:1rem 1.1rem}}
+.tile h3{{margin:.1rem 0 .4rem;font-size:1.02rem;color:#eee}}
+.tile .big{{font-size:1.25rem;font-weight:700}}
+details{{margin:.8rem 0}}summary{{cursor:pointer;color:%(acc)s}}
 </style></head><body>
-<nav><a href="/" class="{act_status}">Stav</a><a href="/sms" class="{act_sms}">SMS</a>{net_tab}
-<a href="/diag" class="{act_diag}">Diagnostika</a></nav>
+<nav><span class="brand">{brand}</span>{nav}</nav>
 <main>{body}</main>
-<footer style="padding:1rem;text-align:center"><small>GSM2SIP · jen LAN/WG · {now}</small></footer>
-</body></html>"""
+<footer style="padding:1rem;text-align:center"><small>jen LAN/privátní síť · {now}</small></footer>
+</body></html>""" % {"acc": ACCENT, "navbg": NAVBG, "btn": BTN, "btnfg": BTNFG}
+PAGE = PAGE.replace("{brand_plain}", "jednadvacet phone" if GUI else "GSM2SIP")
 
 
 def render(active, body):
-    net_tab = ('<a href="/net" class="%s">Síť</a>' %
-               ("act" if active == "net" else "")) if TS_DIR else ""
-    return PAGE.format(
-        act_status="act" if active == "status" else "",
-        act_sms="act" if active == "sms" else "",
-        act_diag="act" if active == "diag" else "",
-        net_tab=net_tab,
-        body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
+    if GUI:
+        tabs = [("/", "home", "Domů"), ("/sms", "sms", "Zprávy")]
+        if TS_DIR:
+            tabs.append(("/net", "net", "Síť"))
+        tabs.append(("/stav", "status", "Pokročilé"))
+        nav = "".join('<a href="%s" class="%s">%s</a>' %
+                      (h, "act" if active == k else "", t) for h, k, t in tabs)
+        return PAGE.format(nav=nav, brand="jednadvacet <b>phone</b>",
+                           body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
+    tabs = [("/", "status", "Stav"), ("/sms", "sms", "SMS")]
+    if TS_DIR:
+        tabs.append(("/net", "net", "Síť"))
+    tabs.append(("/diag", "diag", "Diagnostika"))
+    nav = "".join('<a href="%s" class="%s">%s</a>' %
+                  (h, "act" if active == k else "", t) for h, k, t in tabs)
+    return PAGE.format(nav=nav, brand="GSM2SIP",
+                       body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
 def esc(s):
     return html.escape(str(s), quote=True)
+
+
+def ts_ip():
+    try:
+        return open(os.path.join(TS_DIR, "ip")).read().strip()
+    except OSError:
+        return ""
+
+
+def modem_summary():
+    """Klíčové položky z `quectel show device state` pro dashboard."""
+    out = cli("quectel show device state " + DEVICE)
+    if out.startswith("CHYBA AMI"):
+        return None
+    d = {}
+    for ln in out.splitlines():
+        if ":" in ln:
+            k, v = ln.split(":", 1)
+            d[k.strip()] = v.strip()
+    return d
+
+
+def page_home(info=""):
+    """GUI režim (Umbrel): spotřebitelský dashboard místo technických výpisů."""
+    tiles = []
+    m = modem_summary()
+    if m and m.get("State") == "Free":
+        tiles.append(
+            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big ok">Připojeno</div>'
+            "<small>%s · %s · signál %s</small></div>"
+            % (esc(m.get("Provider Name", "?")),
+               esc(m.get("Access technology", "?")), esc(m.get("RSSI", "?"))))
+    elif m and m.get("State"):
+        tiles.append(
+            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big warn">%s</div>'
+            "<small>modem se připojuje — chvíli to trvá; zkontroluj SIM a anténu</small></div>"
+            % esc(m.get("State")))
+    else:
+        tiles.append(
+            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big bad">Nedostupné</div>'
+            '<small>ústředna nekomunikuje — detail v <a href="/stav">Pokročilé</a></small></div>')
+    ip = ts_ip()
+    if ip:
+        tiles.append(
+            '<div class="tile"><h3>🔒 Privátní síť</h3><div class="big ok">Připojeno</div>'
+            "<small>adresa krabičky: <b>%s</b> · <a href=\"/net\">detail</a></small></div>" % esc(ip))
+    else:
+        tiles.append(
+            '<div class="tile"><h3>🔒 Privátní síť</h3><div class="big warn">Nepřipojeno</div>'
+            '<small><a href="/net">vlož klíč privátní sítě</a> — telefon se pak dovolá odkudkoli</small></div>')
+    sec = read_secrets()
+    if ip and sec.get("SIP_USER"):
+        tiles.append(
+            '<div class="tile"><h3>📱 Telefon</h3><div class="big ok">Připraveno</div>'
+            '<small>přihlašovací údaje pro aplikaci najdeš v <a href="/net">Síť</a>; '
+            'návod: <a href="https://phone.twentyone.cz/instalace" target="_blank">instalace</a></small></div>')
+    else:
+        tiles.append(
+            '<div class="tile"><h3>📱 Telefon</h3><div class="big warn">Čeká</div>'
+            "<small>nejdřív připoj krabičku do privátní sítě</small></div>")
+    rows = read_journal(limit=5)
+    last = rows[0] if rows else None
+    tiles.append(
+        '<div class="tile"><h3>💬 Zprávy</h3><div class="big">%s</div>'
+        '<small>%s · <a href="/sms">všechny zprávy</a></small></div>'
+        % ((esc(last["from"]) if last else "—"),
+           (esc(last["msg"][:60]) if last else "zatím žádné")))
+    mode = get_missed_mode()
+    modeform = (
+        '<form class="inline" method="post" action="/missed-mode">'
+        '<label><input type="radio" name="mode" value="ring"%s> vyzvánět naprázdno</label>'
+        '<label><input type="radio" name="mode" value="announce"%s> hláska nedostupnosti</label>'
+        "<button>Uložit</button></form>"
+        % (" checked" if mode == "ring" else "", " checked" if mode == "announce" else ""))
+    return render("home", (
+        '%s<div class="tiles">%s</div>'
+        "<h2>Když nejsi k zastižení</h2>"
+        "<p><small>Zmeškaný hovor ti vždy přijde jako zpráva. Co má slyšet volající:</small></p>%s"
+    ) % (info, "".join(tiles), modeform))
 
 
 def page_status(mode_info=""):
@@ -429,6 +531,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return self._deny()
         if self.path == "/":
+            return self._html(page_home() if GUI else page_status())
+        if self.path == "/stav":
             return self._html(page_status())
         if self.path == "/sms":
             return self._html(page_sms())
@@ -443,9 +547,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._deny()
         form = self._form()
         if self.path == "/missed-mode":
+            page = page_home if GUI else page_status
             mode = form.get("mode", "")
             if mode not in MISSED_MODES:
-                return self._html(page_status('<p class="bad">Neplatný režim.</p>'))
+                return self._html(page('<p class="bad">Neplatný režim.</p>'))
             # Enum konstanta, žádný user input do CLI. Dialplan čte
             # ${DB(gsm2sip/missed_mode)} — AstDB leží na persistentním volume
             # (astdbdir v asterisk.conf), takže volba přežije i recreate.
@@ -453,7 +558,7 @@ class Handler(BaseHTTPRequestHandler):
             saved = get_missed_mode()
             info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
                 else '<p class="bad">Zápis se nepotvrdil — zkontroluj AMI/AstDB.</p>'
-            return self._html(page_status(info))
+            return self._html(page(info))
         if self.path == "/sms/send":
             to = "".join(c for c in form.get("to", "") if c in "+0123456789")
             to = normalize_msisdn(to)

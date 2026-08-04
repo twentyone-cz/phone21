@@ -2,7 +2,7 @@ manifestVersion: 1
 id: eddie-gsm2sip
 category: networking
 name: GSM2SIP
-version: "0.9.1"
+version: "0.9.2"
 tagline: Vlastní GSM brána — hovory a SMS z tvé SIM kamkoli přes SIP
 description: >-
   GSM2SIP promění USB LTE modem se SIM kartou v soukromou telefonní bránu:
