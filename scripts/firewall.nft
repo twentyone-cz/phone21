@@ -2,9 +2,9 @@
 #
 # GSM2SIP — firewall brány (nftables)
 #
-# Záměr: z internetu je vidět JEN WireGuard. Signalizace a média (SIP/RTP)
-# jsou dostupné výhradně z tunelu — nikdy z LAN, natož z veřejné IP.
-# Správa (SSH, web UI) je dostupná z LAN i z tunelu.
+# Záměr: z internetu není vidět NIC. Signalizace a média (SIP/RTP) jsou
+# dostupné výhradně z privátní sítě (tailscale0/CockScale) — nikdy z LAN,
+# natož z veřejné IP. Správa (SSH, web UI) je dostupná z LAN i z tunelu.
 #
 # Proč vlastní tabulka a ne /etc/nftables.conf: Docker si spravuje pravidla
 # přes iptables-nft v tabulce `ip filter`/`ip nat`. Kdyby se sem dal obvyklý
@@ -25,11 +25,11 @@
 # (<IP> – <IP>). Odvozovat rozsah z masky rozhraní by tu
 # odřízlo většinu sítě.
 define MGMT_NET   = { 192.168.1.0/24 }
-# Tunelová rozhraní: během migrace na CockScale (tailscale0) jede dočasně
-# i staré wg0; po dokončení migrace z množiny wg0 vypadne a s ním i WG_PORT
-# pravidlo níže (WireGuard se ruší bez náhrady, rozhodnutí 2026-08-04).
-define TUN_IFS    = { "wg0", "tailscale0" }
-define WG_PORT    = 51820
+# Tunel = privátní síť CockScale (tailscale0). WireGuard zrušen bez náhrady
+# 2026-08-04 — z veřejné IP už brána nepřijímá NIC (tailscale navazuje
+# odchozí spojení, příchozí P2P pakety kryje conntrack po hole-punchi,
+# fallback je DERP relay na serveru CockScale).
+define TUN_IFS    = { "tailscale0" }
 define SIP_PORT   = 5060           # pjsip.conf: transport-tcp bind 0.0.0.0:5060
 define RTP_PORTS  = 10000-10100    # rtp.conf: rtpstart/rtpend
 define WEBUI_PORT = 8090           # .env WEBUI_PORT
@@ -60,10 +60,8 @@ table inet gsm2sip {
     udp sport 67 udp dport 68 accept
     udp sport 547 udp dport 546 accept
 
-    # --- Jediné, co smí přijít z veřejné IP ------------------------------
-    # WireGuard: na paket bez platného klíče neodpoví, takže se port zvenčí
-    # tváří jako zavřený. Port forward na routeru míří sem a nikam jinam.
-    udp dport $WG_PORT accept
+    # --- Z veřejné IP nesmí přijít nic -----------------------------------
+    # (WireGuard vč. portu 51820 zrušen; žádný port forward na bránu.)
 
     # --- Správa: LAN i tunel ---------------------------------------------
     ip saddr $MGMT_NET tcp dport 22 accept

@@ -51,11 +51,6 @@ services:
       SIP_USER: ${SIP_USER}
       SIP_DOMAIN: ${SIP_DOMAIN}
       COUNTRY_CODE: ${COUNTRY_CODE:-420}  # normalizace čísel na E.164 (viz dialplan)
-      WG_ENDPOINT: ${WG_ENDPOINT:-}   # předvyplnění pole na záložce Telefon
     volumes:
       - ./runtime/smsdata:/var/lib/gsm2sip:ro
       - ./runtime/astlog:/var/log/asterisk:ro
-      # Config peeru pro telefon (QR na záložce Telefon). Jen tenhle jeden
-      # soubor — /etc/wireguard se dovnitř nemountuje, aby se privátní klíč
-      # SERVERU nedostal do kontejneru s web UI.
-      - ./runtime/wg/phone-wg.conf:/etc/wireguard-peer/phone-wg.conf:ro
