@@ -19,7 +19,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-REGISTRY="${REGISTRY:-it-one.cz/eddie}"
+REGISTRY="${REGISTRY:-it-one.cz/21}"
 VERSION="${VERSION:?nastav VERSION, např. VERSION=0.9.0}"
 PLATFORMS="linux/amd64,linux/arm64"
 
