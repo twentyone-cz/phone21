@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>jednadvacet phone — instalace</title>
+<meta name="description" content="Jak rozjet vlastní telefonní krabičku: umbrelOS nebo Docker, připojení telefonu přes privátní síť.">
+<style>
+  :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --acc:#F7931A; --card:#161b22; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); line-height:1.65; }
+  main { max-width:820px; margin:0 auto; padding:1.5rem; }
+  header { text-align:center; padding:2.5rem 1rem 1rem; }
+  .logo { height:1.8rem; vertical-align:middle; }
+  h1 { font-size:1.6rem; margin:.5rem 0 0; }
+  h2 { color:var(--acc); margin-top:2.4rem; font-size:1.25rem; }
+  ol.steps { padding-left:1.3rem; }
+  ol.steps li { margin:.55rem 0; }
+  code, pre { background:#010409; border:1px solid #21262d; border-radius:6px; font-size:.88rem; }
+  code { padding:.1rem .35rem; }
+  pre { padding:.8rem 1rem; overflow-x:auto; }
+  a { color:#58a6ff; text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .honest { border-left:3px solid var(--acc); padding:.2rem 1rem; color:var(--dim); background:var(--card); border-radius:0 8px 8px 0; }
+  .req { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
+  footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.5rem 1rem; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/"><img class="logo" src="jednadvacet.svg" alt="jednadvacet"></a>
+  <h1>Instalace</h1>
+</header>
+<main>
+
+<div class="req">
+  <b>Co budeš potřebovat:</b> mini-server (Raspberry Pi 4/5, nebo cokoli
+  s Dockerem), USB LTE modem <b>výrobce modem</b>, svoji SIM kartu,
+  Lightning peněženku (Phoenix, Zeus, Alby…) a ~hodinu času.
+</div>
+
+<h2>1. Krabička</h2>
+
+<p><b>A) umbrelOS (doporučeno — Raspberry Pi i x86):</b></p>
+<ol class="steps">
+  <li>V umbrelOS otevři <i>App Store → ⋯ → Community App Stores</i> → vlož
+  <code>https://it-one.cz/git/Eddie/umbrel-store</code> → Add.</li>
+  <li>Nainstaluj appku <b>GSM2SIP</b>.</li>
+  <li>Zapoj USB modem se SIM a otevři appku — o zbytek se postará sama.</li>
+</ol>
+
+<p><b>B) Obecný Docker (jakýkoli Linux):</b></p>
+<pre>git clone https://it-one.cz/git/21/Gsm2Sip && cd Gsm2Sip
+mkdir -p data/{smsdata,spool,astlog,ts-state}
+WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d</pre>
+<p>Web rozhraní krabičky pak běží na <code>http://adresa-serveru:8090</code>.</p>
+
+<h2>2. Privátní síť</h2>
+<ol class="steps">
+  <li>V <a href="/app">Můj účet</a> se přihlas Lightning peněženkou, zaplať
+  předplatné a dej <b>Přidat zařízení</b> — dostaneš jednorázový klíč
+  (platí 24 h, zobrazí se jen jednou).</li>
+  <li>Klíč vlož ve web rozhraní krabičky na záložce <b>Síť</b> → Připojit.
+  Za chvíli tam uvidíš adresu krabičky v privátní síti.</li>
+</ol>
+
+<h2>3. Telefon</h2>
+<ol class="steps">
+  <li>Nainstaluj aplikaci <b>Tailscale</b> (Google Play, nebo přes Obtainium;
+  verzi z F-Droidu ne — má chybu s vlastním serverem). V ní:
+  <i>Settings → Accounts → ⋯ → Use an alternate server</i> → zadej
+  <code>https://cockscale.twentyone.cz</code> → potvrď v prohlížeči
+  peněženkou. Tím je telefon ve tvé privátní síti.</li>
+  <li>Nainstaluj aplikaci <b>Linphone</b> a zadej do ní přihlašovací údaje
+  ze záložky <b>Síť</b> web rozhraní krabičky (uživatel, heslo, adresa
+  serveru, transport UDP).</li>
+  <li>Hotovo — voláš a píšeš ze svého čísla odkudkoli. Doporučení pro
+  Android: Linphone i Tailscale nastav v systému na
+  <i>Baterie → Neomezeno</i>, ať tě spolehlivě dozvoní.</li>
+</ol>
+
+<h2>Soukromí — poctivě</h2>
+<div class="honest">
+  <p>Koordinační server privátní sítě nutně vidí veřejné IP adresy tvých
+  zařízení (jinak se nenajdou) a čas připojení — nikdy obsah hovorů ani
+  zpráv, ten jde šifrovaně mezi telefonem a krabičkou. Po zrušení účtu
+  data mažeme. Aplikace třetích stran mají vlastní telemetrii: u Tailscale
+  appky doporučujeme zablokovat doménu <code>log.tailscale.io</code>
+  (privátní DNS/blokátor) — krabička má telemetrii vypnutou už z výroby.
+  Všechno je open source — <a href="https://it-one.cz/git/21/Gsm2Sip">ověř si nás</a>.</p>
+</div>
+
+<footer>
+  <a href="/">← zpět na jednadvacet phone</a>
+</footer>
+</main>
+</body>
+</html>

@@ -3,110 +3,90 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Phone 21 — tvoje SIM, tvůj server, tvoje soukromí</title>
-<meta name="description" content="Vlastní GSM brána: hovory a SMS z tvé SIM karty kamkoli přes privátní šifrovanou síť. Bez účtů, bez veřejné IP, platba Lightningem.">
+<title>jednadvacet phone — tvoje číslo, tvůj server, tvoje soukromí</title>
+<meta name="description" content="Tvoje telefonní číslo s tebou kamkoli — přes vlastní krabičku doma a šifrovanou privátní síť. Bez účtů, bez smluv, platba Lightningem.">
 <style>
-  :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --acc:#f0b429; --card:#161b22; --ok:#3fb950; }
+  :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --acc:#F7931A; --card:#161b22; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); line-height:1.6; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); line-height:1.65; }
   main { max-width:880px; margin:0 auto; padding:1.5rem; }
-  header { text-align:center; padding:3.5rem 1rem 2rem; }
-  h1 { font-size:2.4rem; margin:.2rem 0; }
-  h1 .n { color:var(--acc); }
-  .tag { color:var(--dim); font-size:1.15rem; max-width:40rem; margin:0 auto; }
-  h2 { color:var(--acc); margin-top:2.6rem; font-size:1.3rem; }
+  header { text-align:center; padding:3.5rem 1rem 2.2rem; }
+  .logo { height:2.4rem; vertical-align:middle; }
+  .brand { font-size:2.2rem; font-weight:800; letter-spacing:.02em; }
+  .brand .phone { color:var(--acc); }
+  .tag { color:var(--dim); font-size:1.18rem; max-width:42rem; margin:1rem auto 0; }
+  h2 { color:var(--acc); margin-top:2.8rem; font-size:1.35rem; }
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1rem; margin:1.4rem 0; }
-  .card { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1.1rem 1.2rem; }
-  .card b { display:block; margin-bottom:.35rem; }
+  .card { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1.15rem 1.25rem; }
+  .card b { display:block; margin-bottom:.35rem; font-size:1.02rem; }
   .card small { color:var(--dim); }
-  ol.steps { padding-left:1.3rem; }
-  ol.steps li { margin:.55rem 0; }
-  code, pre { background:#010409; border:1px solid #21262d; border-radius:6px; font-size:.88rem; }
-  code { padding:.1rem .35rem; }
-  pre { padding:.8rem 1rem; overflow-x:auto; }
+  .how { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; counter-reset:krok; }
+  .how div { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1rem 1.2rem; color:var(--dim); }
+  .how div::before { counter-increment:krok; content:counter(krok); display:block; color:var(--acc); font-size:1.5rem; font-weight:800; }
+  .how div b { color:var(--fg); display:block; margin:.2rem 0 .3rem; }
   a { color:#58a6ff; text-decoration:none; }
   a:hover { text-decoration:underline; }
-  .cta { display:inline-block; background:var(--acc); color:#0d1117; font-weight:700; padding:.7rem 1.4rem; border-radius:8px; margin:.6rem .4rem 0 0; }
+  .cta { display:inline-block; background:var(--acc); color:#0d1117; font-weight:700; padding:.75rem 1.5rem; border-radius:8px; margin:.7rem .4rem 0 0; }
+  .cta.sec { background:var(--card); color:var(--fg); border:1px solid #30363d; }
   .cta:hover { text-decoration:none; filter:brightness(1.08); }
   .honest { border-left:3px solid var(--acc); padding:.2rem 1rem; color:var(--dim); background:var(--card); border-radius:0 8px 8px 0; }
-  footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.5rem 1rem; }
+  footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.8rem 1rem; }
+  footer img { height:1.1rem; vertical-align:middle; opacity:.8; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Phone <span class="n">21</span></h1>
-  <p class="tag">Tvoje SIM karta doma na tvém serveru. Hovory a SMS z tvého čísla
-  kamkoli na světě — přes privátní šifrovanou síť, bez účtů a bez odposlouchávatelných
-  prostředníků.</p>
+  <p><img class="logo" src="jednadvacet.svg" alt="jednadvacet"></p>
+  <div class="brand"><span class="phone">phone</span></div>
+  <p class="tag">Tvoje telefonní číslo s tebou kamkoli na světě — bez roamingu,
+  bez smluv navíc a bez firem, které čtou, komu voláš. Krabička u tebe doma,
+  šifrovaná síť, a soukromí, jak má být.</p>
   <p>
-    <a class="cta" href="#instalace">Rozjet vlastní bránu</a>
-    <a class="cta" style="background:var(--card);color:var(--fg);border:1px solid #30363d" href="/app">Můj účet →</a>
+    <a class="cta" href="/instalace">Jak začít</a>
+    <a class="cta sec" href="/app">Můj účet →</a>
   </p>
 </header>
 <main>
 
-<h2>Jak to funguje</h2>
-<p>Do svého serveru (Raspberry Pi s umbrelOS, nebo cokoli s Dockerem) zapojíš
-USB LTE modem se svojí SIM. Brána promění mobilní síť v SIP: na telefonu pak
-v aplikaci Linphone voláš a píšeš <b>ze svého čísla</b> — z domu, z ciziny,
-z mobilních dat. Telefon a brána se najdou přes naši privátní síť — bez veřejné IP,
-bez port forwardu, bez registrace.</p>
-
+<h2>Co dostaneš</h2>
 <div class="cards">
-  <div class="card"><b>📞 Hovory obousměrně</b><small>Příchozí i odchozí, včetně
-  VoLTE (automatická volba carrier profilu modemu). Zmeškané hovory ti přijdou
-  jako zpráva do chatu.</small></div>
-  <div class="card"><b>💬 SMS v chatu</b><small>Příchozí i odchozí SMS jako
-  konverzace v Linphone, s potvrzenkami a spolehlivým doručením přes frontu,
-  i když jsi zrovna offline.</small></div>
-  <div class="card"><b>🔒 Soukromí především</b><small>Žádné účty, žádný e-mail.
-  Identita = klíč z Lightning peněženky. Provoz šifrovaný end-to-end, koordinační
-  server vidí jen to minimum, bez kterého to nejde.</small></div>
-  <div class="card"><b>⚡ Platba Lightningem</b><small>Privátní síť se platí
-  bitcoinem přes Lightning — anonymně, bez karty, bez faktury. Vlastní hardware
-  je tvůj, jednou provždy.</small></div>
+  <div class="card"><b>📞 Tvoje číslo kdekoli</b><small>Voláš a přijímáš hovory
+  ze svého čísla z domu, z hor i z ciziny — jako bys stál vedle své SIM karty.
+  Zmeškané hovory ti přijdou jako zpráva.</small></div>
+  <div class="card"><b>💬 Zprávy pohromadě</b><small>SMS chodí jako konverzace
+  do jedné aplikace, oběma směry, s potvrzením doručení — a doručí se, i když
+  jsi byl zrovna offline.</small></div>
+  <div class="card"><b>🔒 Nikdo tě nešmíruje</b><small>Žádná registrace, žádný
+  e-mail, žádná smlouva. Tvůj provoz jede šifrovaně mezi tvým telefonem a tvou
+  krabičkou — my vidíme jen to minimum, bez kterého se zařízení nenajdou.</small></div>
+  <div class="card"><b>⚡ Platíš Lightningem</b><small>Síťová služba se platí
+  bitcoinem — anonymně, bez karty. Hardware je tvůj napořád; platíš jen
+  propojení, a jen dokud ho chceš.</small></div>
 </div>
 
-<h2 id="instalace">Instalace</h2>
+<h2>Jak to funguje</h2>
+<div class="how">
+  <div><b>Krabička doma</b>Do svého mini-serveru zapojíš modem se svojí SIM.
+  To je tvoje vlastní telefonní ústředna — bez cloudu.</div>
+  <div><b>Aplikace v telefonu</b>Telefon se ke krabičce připojí šifrovanou
+  privátní sítí — odkudkoli, bez nastavování routeru.</div>
+  <div><b>A voláš</b>Hovory, SMS, zmeškané hovory — všechno z tvého čísla,
+  všechno pod tvou kontrolou.</div>
+</div>
 
-<p><b>A) umbrelOS (Raspberry Pi 4/5 nebo x86):</b></p>
-<ol class="steps">
-  <li>V umbrelOS: <i>App Store → ⋯ → Community App Stores</i> → vlož
-  <code>https://it-one.cz/git/Eddie/umbrel-store</code> → Add.</li>
-  <li>Nainstaluj appku <b>GSM2SIP</b> z „Eddie Apps".</li>
-  <li>Zapoj USB LTE modem (výrobce modem) se SIM kartou a otevři appku.</li>
-</ol>
-
-<p><b>B) Obecný Docker (jakýkoli Linux):</b></p>
-<pre>git clone https://it-one.cz/git/21/Gsm2Sip && cd Gsm2Sip
-mkdir -p data/{smsdata,spool,astlog,ts-state}
-WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d</pre>
-
-<h2>Připojení telefonu</h2>
-<ol class="steps">
-  <li>V <a href="/app">Můj účet</a> se přihlas Lightning peněženkou (Phoenix,
-  Zeus, Alby…), zaplať předplatné a dej <b>Přidat zařízení</b> → klíč vlož
-  do web UI brány (záložka <i>Síť</i>).</li>
-  <li>Na telefonu nainstaluj <b>Tailscale</b> (Play/Obtainium) →
-  <i>Use an alternate server</i> → <code>https://cockscale.twentyone.cz</code>
-  → potvrď v prohlížeči peněženkou.</li>
-  <li>Nainstaluj <b>Linphone</b> a zadej SIP údaje ze záložky <i>Síť</i>
-  web UI brány. Hotovo — voláš ze svého čísla odkudkoli.</li>
-</ol>
-
-<h2>Poctivé limity</h2>
+<h2>Proč od jednadvacítky</h2>
 <div class="honest">
-  <p>Potřebuješ vlastní hardware (server + podporovaný USB modem + SIM) a
-  ~hodinu času. Koordinační server privátní sítě nutně vidí veřejné IP tvých
-  zařízení (bez toho se nenajdou) — nikdy ale obsah hovorů ani zpráv; data po
-  zrušení mažeme. Klientské aplikace třetích stran (Tailscale, Linphone) jsou
-  open source — návod obsahuje kroky, jak vypnout jejich telemetrii.</p>
+  <p>Jsme komunita kolem bitcoinu a soukromí (<a href="https://jednadvacet.org">jednadvacet.org</a>).
+  Tenhle produkt stavíme, protože ho sami chceme: telefonování bez prostředníků,
+  celé nad open source, s poctivě popsanými limity — co vidíme a co ne, najdeš
+  černé na bílém v <a href="/instalace">návodu</a>. Žádný marketingový mlžný opar.</p>
 </div>
 
 <footer>
-  Phone 21 · <a href="https://it-one.cz/git/21/Gsm2Sip">zdrojové kódy</a> ·
-  <a href="/app">privátní síť</a><br>
-  Postaveno na open source: Asterisk, WireGuard/Tailscale, headscale, Linphone.
+  <img src="jednadvacet.svg" alt="jednadvacet"> phone ·
+  <a href="/instalace">instalace</a> ·
+  <a href="https://it-one.cz/git/21/Gsm2Sip">zdrojové kódy</a> ·
+  <a href="https://jednadvacet.org">jednadvacet.org</a>
 </footer>
 </main>
 </body>
