@@ -1,0 +1,11 @@
+[Unit]
+Description=GSM2SIP: aktivace MBN profilu profil po startu (VoLTE)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/Gsm2Sip/scripts/mbn-dt-activate.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

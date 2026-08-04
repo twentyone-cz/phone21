@@ -119,31 +119,43 @@ AT+CVOLTE?     ; VoLTE — u firmwaru 2021 často vypnutá, bez ní LTE hovor ne
 AT+COPS?       ; operátor
 AT+CEREG?      ; 0,1 nebo 0,5 = registrován
 ```
-**Gate:** registrace v LTE splněna. **VoLTE: prošetřeno 2026-08-04, na této
-kombinaci NEFUNGUJE a neopravíme to z AT příkazů** — hovory jedou spolehlivě
-přes CSFB do 2G (T-Mobile CZ 2G běží, vypnutí se čeká nejdřív ~2028).
+**Gate:** registrace v LTE splněna. **VoLTE: rozpracováno (2026-08-04)** —
+hovory zatím jedou přes CSFB do 2G; blok je zúžen na IMS SIP registraci,
+poslední podezřelý je provisioning testovací SIM (ověřuje se v telefonu).
 
-Zjištění (modem firmware…M22, testovací T-Mobile CZ SIM):
-- firmware VoLTE zapnuté (`AT+VOLTESETTING?` → 1), síť **IMS PDN přidělila**
-  (`AT+CGACT?` → cid 2 „ims" aktivní, `AT+CGPADDR` → IPv4+IPv6 adresa),
-- ale IMS SIP registrace neproběhne: v LTE-only režimu (`AT+CNMP=38`) se
-  odchozí hovor vůbec nesestaví (žádné `+CLCC`) → modem neumí hlas přes IMS
-  postavit; v auto režimu každý hovor = CSFB (`+CPSI?` během hovoru: GSM
-  EGSM 900, `+CNSMOD: 1`),
-- příčina: chybí Qualcomm carrier profil (MBN) pro T-Mobile CZ — UT/XCAP
-  konfigurace hlásí AT&T default `nxtgenphone` (`AT+UTAPNCFG?`); náprava by
-  vyžadovala nahrání MBN přes DIAG port (QPST, změna USB kompozice =
-  zakázané `CUSBPIDSWITCH` teritorium) + entitlement IMEI u operátora —
-  obojí mimo rozumný rozsah,
-- `+CIREG`/`+CAVIMS`/`+CVDP` tento firmware nepodporuje; IMS příkazy jsou
+Zjištění a stav (modem firmware…M22, testovací T-Mobile CZ SIM):
+- firmware VoLTE zapnuté (`AT+VOLTESETTING?` → 1), síť IMS PDN přiděluje
+  (cid 2 „ims" aktivní s adresou) a buňka hlásí **VoPS „IMS voice support:
+  yes"** (`qmicli --nas-get-system-info`); voice domain je `ps-preferred`,
+  usage `voice-centric` (`--nas-get-system-selection-preference`),
+- přesto **IMS registrace neproběhne**: `qmicli
+  --imsa-get-ims-registration-status` → `not-registered`, voice/SMS over
+  IMS `unavailable` (zajímavost: „UE to TAS" služba available); v LTE-only
+  (`AT+CNMP=38`) se hovor vůbec nesestaví, v auto režimu vše CSFB,
+- **MBN carrier profily se spravují z Linuxu přes QMI PDC**: do LXC je
+  protažené `/dev/cdc-wdm0` (v `/etc/pve/lxc/<id>.conf`:
+  `lxc.cgroup2.devices.allow: c 180:* rwm` + `lxc.mount.entry:
+  /dev/cdc-wdm0 …`), `apt install libqmi-utils`, `qmicli -d /dev/cdc-wdm0
+  --pdc-list-configs=software`. firmware obsahuje 13 profilů (profil,
+  **profil**, Orange, EE, VF_*, TF_Germany, Reliance, Airtel);
+  autoselect podle SIM nemá pro TMCZ shodu → bootuje profil
+  (mimochodem s AT&T zbytky v UT konfiguraci),
+- aktivován **profil** (matka TMCZ) — přepnutí funguje za horka
+  (`--pdc-deactivate-config` ROW + `--pdc-activate-config` DT, UTAPNCFG se
+  změní); po resetu modemu ho autoselect vrací, drží ho proto systemd
+  oneshot **`gsm2sip-mbn.service`** (`scripts/mbn-dt-activate.sh`),
+- `+CIREG`/`+CAVIMS`/`+CVDP` firmware nemá; nedokumentované IMS příkazy:
   `+IMSREGDB`, `+IMSSIPCFG`, `+IMSSMSCFG`, `+UTAPNCFG` (viz `AT+CLAC`).
 
-Kdyby VoLTE bylo v budoucnu potřeba (vypínání 2G): (a) ověřit provisioning
-SIM v běžném telefonu, (b) zvážit modem s carrier profily pro EU operátory
-(např. Quectel EG25-G, ověřený VoLTE v PinePhone komunitě). Diagnostika se
-dělá přes druhý AT port `/dev/ttyUSB3` z LXC (`./at.sh 'AT+…' /dev/ttyUSB3`)
-— nedrží ho chan_quectel; pozor, `AT+CNMP` přepnutí vyhodí driver (nutný
-`docker restart asterisk`).
+Otevřené kroky: (1) **provisioning testovací SIM** — ověřit VoLTE v běžném
+telefonu (TMCZ aktivuje VoLTE na lince do 24 h po prvním VoLTE-schopném
+zařízení); (2) pokud SIM OK a stále nic: plný boot s DT profilem (vypnout
+mcfg autoselect — jen přes QPST/EFS), dotaz na Techship/výrobce support,
+příp. MBN úpravy (mbn-mcfg-tools). Firmware neupgradovat — firmware je
+poslední publikovaný a flash = jediné reálné riziko bricku. Diagnostika:
+druhý AT port `/dev/ttyUSB3` z LXC (`./at.sh 'AT+…' /dev/ttyUSB3`), pozor
+`AT+CNMP`/`AT+CRESET` vyhodí driver (restart kontejneru; po CRESET nutný
+reboot LXC — bind mounty drží staré inody).
 
 ### Fáze 3 — SIP endpoint
 ```bash
