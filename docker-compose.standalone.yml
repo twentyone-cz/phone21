@@ -1,0 +1,98 @@
+# GSM2SIP — samostatné nasazení na OBECNÉM dockeru (jakýkoli Linux, x86/ARM).
+#
+# Na rozdíl od hlavního docker-compose.yml (LXC režim s configure.sh na
+# hostu) se tady kontejner konfiguruje SÁM (entrypoint, tajemství se
+# vygenerují a drží ve volume) a watchdog i VoLTE MBN profil běží uvnitř.
+# Tunel k telefonu řeší tailnet sidecar (login server CockScale).
+#
+# Použití:
+#   mkdir -p data/{smsdata,spool,astlog,ts-state}
+#   docker compose -f docker-compose.standalone.yml up -d
+#   → web UI: http://<host>:8090 (heslo WEBUI_PASSWORD z env/.env)
+#   → záložka Síť: vložit auth klíč privátní sítě; po připojení tam
+#     najdeš SIP údaje pro Linphone
+#
+# Env (volitelně přes .env): WEBUI_PASSWORD (povinné), COUNTRY_CODE,
+# COCKSCALE_URL, TZ, MODEM_BY_ID (viz níže).
+
+services:
+  asterisk:
+    image: it-one.cz/eddie/gsm2sip-asterisk:0.9.0
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: gsm2sip-asterisk
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      GSM2SIP_SELFCONFIG: "1"
+      SUPERVISE: "1"
+      WATCHDOG_INTERNAL: "1"
+      MBN_INTERNAL: "1"
+      COUNTRY_CODE: ${COUNTRY_CODE:-420}
+      AMI_BIND: 0.0.0.0
+      # webui běží v bridge síti dockeru → povolit lokální + docker subnety
+      AMI_PERMIT: "127.0.0.1/255.255.255.255,172.16.0.0/255.240.0.0"
+    group_add:
+      - "20"
+    devices:
+      - "${MODEM_BY_ID:-/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if02-port0}:/dev/ttyUSB2"
+      - "${MODEM_AUDIO_BY_ID:-/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0}:/dev/ttyUSB4"
+      - "/dev/cdc-wdm0:/dev/cdc-wdm0"
+    volumes:
+      - ./data/smsdata:/var/lib/gsm2sip
+      - ./data/spool:/var/spool/asterisk/outgoing
+      - ./data/astlog:/var/log/asterisk
+
+  webui:
+    image: it-one.cz/eddie/gsm2sip-webui:0.9.0
+    build: ./webui
+    container_name: gsm2sip-webui
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:?nastav WEBUI_PASSWORD}
+      WEBUI_PORT: 8090
+      AMI_HOST: host.docker.internal
+      AMI_SECRETS_FILE: /var/lib/gsm2sip/secrets.env
+      TS_DIR: /var/lib/gsm2sip/ts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/smsdata:/var/lib/gsm2sip:ro
+      - ./data/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      - ./data/astlog:/var/log/asterisk:ro
+
+  tailnet:
+    image: tailscale/tailscale:v1.86.2
+    container_name: gsm2sip-tailnet
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_NO_LOGS_NO_SUPPORT: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      COCKSCALE_URL: ${COCKSCALE_URL:-https://coord.it-one.cz}
+    volumes:
+      - ./data/ts-state:/var/lib/tailscale
+      - ./data/smsdata/ts:/gsm2sip-ts
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        tailscaled --state=/var/lib/tailscale/tailscaled.state &
+        sleep 3
+        if [ -s /gsm2sip-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        fi
+        while true; do
+          ip="$$(tailscale ip -4 2>/dev/null | head -1)"
+          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          sleep 60
+        done
