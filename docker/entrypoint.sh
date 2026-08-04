@@ -120,6 +120,8 @@ if [[ "${GSM2SIP_SELFCONFIG:-0}" == "1" ]]; then
 fi
 [[ "${WATCHDOG_INTERNAL:-0}" == "1" ]] && watchdog_loop &
 [[ "${MBN_INTERNAL:-0}" == "1" ]] && mbn_loop &
+# Ostrovní režim: internet failover přes modem (vyžaduje NET_ADMIN + host síť)
+[[ "${WWAN_FAILOVER:-0}" == "1" ]] && /opt/gsm2sip/scripts/wwan.sh watch &
 
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
   while true; do

@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: it-one.cz/21/gsm2sip-asterisk:0.9.0
+    image: it-one.cz/21/gsm2sip-asterisk:0.9.1
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -34,6 +34,12 @@ services:
       AMI_BIND: 0.0.0.0
       # webui běží v bridge síti dockeru → povolit lokální + docker subnety
       AMI_PERMIT: "127.0.0.1/255.255.255.255,172.16.0.0/255.240.0.0"
+      # Ostrovní režim: při výpadku domácího internetu přepne krabička
+      # default route na data modemu (WWAN_FAILOVER=1 + APN tarifu SIM).
+      WWAN_FAILOVER: ${WWAN_FAILOVER:-0}
+      WWAN_APN: ${WWAN_APN:-internet}
+    cap_add:
+      - NET_ADMIN              # ostrovní režim: správa wwan0 a default route
     group_add:
       - "20"
     devices:

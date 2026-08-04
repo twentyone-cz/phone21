@@ -81,6 +81,14 @@ WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d
   jinak tě hovor nemusí dozvonit.</li>
 </ol>
 
+<h2>Volitelné: ostrovní režim</h2>
+<p>Krabička umí při výpadku domácího internetu automaticky přejít na mobilní
+data z tvé SIM — zůstaneš dosažitelný, dokud jede mobilní síť, a po zotavení
+přípojky se sama vrátí zpět. V Docker variantě se zapíná proměnnými
+<code>WWAN_FAILOVER=1 WWAN_APN=internet</code> (APN podle tvého tarifu;
+data v ostrovním režimu jdou z balíčku SIM). Do Umbrel appky přibude
+přepínač v rozhraní.</p>
+
 <h2>Soukromí</h2>
 <div class="honest">
   <p>Koordinační server privátní sítě nutně vidí veřejné IP adresy tvých

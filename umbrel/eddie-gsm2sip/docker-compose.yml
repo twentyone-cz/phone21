@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: it-one.cz/21/gsm2sip-asterisk:0.9.0@sha256:9df970bad98a2e870da607efbe74ca8e98c9e09ba1bc7a973ee27388b9bb64ba
+    image: it-one.cz/21/gsm2sip-asterisk:0.9.1
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
     environment:
@@ -26,6 +26,11 @@ services:
       # localhost a interní Umbrel subnety (deny 0.0.0.0/0 je v šabloně):
       AMI_BIND: 0.0.0.0
       AMI_PERMIT: "127.0.0.1/255.255.255.255,10.21.0.0/255.255.0.0"
+      # Ostrovní režim (failover internetu přes modem) — opt-in:
+      WWAN_FAILOVER: ${WWAN_FAILOVER:-0}
+      WWAN_APN: ${WWAN_APN:-internet}
+    cap_add:
+      - NET_ADMIN                 # ostrovní režim: wwan0 + default route
     group_add:
       - "20"                      # dialout
     devices:

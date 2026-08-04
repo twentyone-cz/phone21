@@ -45,9 +45,10 @@ RUN find build -name 'chan_quectel.so' -exec cp {} /chan_quectel.so \; \
 
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-# libqmi-utils: správa MBN carrier profilu (VoLTE) v režimu MBN_INTERNAL=1
+# libqmi-utils: MBN profil (VoLTE) + wwan data; iproute2/iputils: ostrovní režim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       asterisk asterisk-core-sounds-en-gsm tzdata libqmi-utils \
+      iproute2 iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     # přístup na ttyUSB (gid 20 = dialout) — nezávisle na group_add v compose
     && usermod -aG dialout asterisk
@@ -62,9 +63,9 @@ RUN moddir="$(dirname "$(find /usr/lib -name 'chan_pjsip.so' -path '*asterisk*' 
 # POZOR: build context je KOŘEN repa (docker-compose.yml: context: .,
 # dockerfile: docker/Dockerfile) — kvůli přístupu k asterisk/ a scripts/.
 COPY asterisk/ /opt/gsm2sip/templates/
-COPY scripts/mbn-profile.sh /opt/gsm2sip/scripts/mbn-profile.sh
+COPY scripts/mbn-profile.sh scripts/wwan.sh /opt/gsm2sip/scripts/
 COPY docker/entrypoint.sh /opt/gsm2sip/entrypoint.sh
-RUN chmod +x /opt/gsm2sip/entrypoint.sh /opt/gsm2sip/scripts/mbn-profile.sh
+RUN chmod +x /opt/gsm2sip/entrypoint.sh /opt/gsm2sip/scripts/*.sh
 
 # POZOR: bez -G! S rungroup Asterisk zahodí supplementary skupiny (dialout →
 # Permission denied na ttyUSB). Samotné -U jde přes initgroups(), dialout drží.
