@@ -164,9 +164,14 @@ _prov_tokens = {}          # token -> (expiruje, použito)
 _prov_lock = threading.Lock()
 
 
+_PROV_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # bez záměnitelných znaků
+
+
 def prov_new_token():
-    """Jednorázový token pro stažení konfigurace softphonem."""
-    token = base64.urlsafe_b64encode(os.urandom(18)).decode().rstrip("=")
+    """Jednorázový token pro stažení konfigurace softphonem. Krátký schválně
+    — když skener QR nefunguje, musí jít URL opsat z obrazovky."""
+    import secrets as _s
+    token = "".join(_s.choice(_PROV_ALPHABET) for _ in range(8))
     with _prov_lock:
         now = time.time()
         for t, (exp, _used) in list(_prov_tokens.items()):
@@ -592,19 +597,26 @@ def page_qr(url):
     """QR s odkazem na konfiguraci — Linphone: Asistent → Načíst vzdálenou
     konfiguraci → naskenovat."""
     body = """<h1>Připojení telefonu</h1>
-<ol>
-<li>V telefonu otevři <b>Linphone</b> (nainstaluj z obchodu, pokud ho nemáš).</li>
-<li>V úvodním průvodci zvol <b>Načíst vzdálenou konfiguraci</b>
-(„Fetch Remote Configuration") → <b>naskenovat QR kód</b>.
-Máš-li už Linphone rozběhaný: Nastavení → Účty → přidat účet → tatáž volba.</li>
-<li>Namiř foťák sem:</li>
-</ol>
+<p>V telefonu otevři <b>Linphone</b> a zvol <b>Načíst vzdálenou konfiguraci</b>
+(„Fetch Remote Configuration"). Pak si vyber, co ti sedne:</p>
+
+<h2>A) Naskenovat</h2>
 <div id="qr" class="qr"></div>
+
+<h2>B) Opsat odkaz</h2>
+<p>Když skener nefunguje (na některých systémech nemá přístup k foťáku),
+vlož do pole pro URL tohle — je to krátké schválně:</p>
+<p class="mono" style="font-size:1.3rem;letter-spacing:.02em">%s</p>
+
+<h2>C) Otevřít odsud</h2>
+<p>Když si tuhle stránku otevřeš rovnou <b>v telefonu</b>, stačí ťuknout:</p>
+<p><a class="btn" href="%s">Nastavit Linphone</a></p>
+
 <p class="small muted">Odkaz platí <b>10 minut</b> a jen na jedno použití;
-obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší, vygeneruj
-si nový.</p>
-<p class="mono small" style="word-break:break-all">%s</p>
-<p><a href="%s">Zpět</a></p>""" % (esc(url), u("/net"))
+obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší nebo se
+nepovede, vrať se a vygeneruj si nový.</p>
+<p><a href="%s">Zpět</a></p>""" % (
+        esc(url), esc("sip-linphone:?linphone-fetch-config=" + url), u("/telefon"))
     body += """<script src="%s"></script><script>
 new QRCode(document.getElementById("qr"), {text: %s, width: 260, height: 260,
   correctLevel: QRCode.CorrectLevel.M});
@@ -725,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_phone(
                     '<p class="bad">Nejdřív připoj krabičku do privátní sítě '
                     "(záložka Síť).</p>"))
-            url = "http://%s:%d/prov/%s.xml" % (ip, PROV_PORT, prov_new_token())
+            url = "http://%s:%d/p/%s" % (ip, PROV_PORT, prov_new_token())
             return self._html(page_qr(url))
         if self.path == "/net/authkey" and TS_DIR:
             key = form.get("authkey", "").strip()
@@ -779,8 +791,12 @@ class ProvHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
-        token = path[len("/prov/"):-len(".xml")] if (
-            path.startswith("/prov/") and path.endswith(".xml")) else ""
+        if path.startswith("/p/"):
+            token = path[3:]
+        elif path.startswith("/prov/") and path.endswith(".xml"):
+            token = path[len("/prov/"):-len(".xml")]
+        else:
+            token = ""
         ip = ts_ip()
         if not token or not ip or not prov_claim(token):
             self.send_response(404)
