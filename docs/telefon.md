@@ -125,6 +125,14 @@ Telefon a brána se najdou přes privátní šifrovanou síť (aplikace
 postup viz <https://phone.twentyone.cz/instalace>). SIP účet v Linphone pak
 míří na adresu brány v téhle síti.
 
+**Účet se nastavuje naskenováním QR kódu**, ne ručně: v ovládání brány
+záložka *Telefon* → *Zobrazit QR pro Linphone*. Kód nese jednorázový odkaz
+na konfiguraci (platí 10 minut, jedno použití) a přečte ho jak skener
+uvnitř Linphonu, tak běžný fotoaparát telefonu. Účet se v telefonu jmenuje
+**myGSM** a rovnou má správnou adresu brány, přihlašovací údaje, UDP
+transport i vypnuté video. Ruční cesta zůstává jako záloha — pak platí
+checklist níž.
+
 ### SIP transport a spolehlivost doručení
 
 Doporučený transport je **UDP**. TCP se v praxi ukázalo křehčí: úsporné
@@ -134,7 +142,7 @@ neudržuje, takže tenhle problém nemá; velké requesty (dlouhé SMS) si PJSIP
 přepne na TCP sám. Na bráně k tomu patří tolerantnější `qualify_timeout`
 (RTT přes mobilní data mívá vteřinové špičky).
 
-**Checklist na telefonu:**
+**Checklist na telefonu** (body 1–2 nastaví QR sám, ověřit se ale vyplatí):
 
 1. Linphone → účet → **Transport: UDP**, expirace registrace 600 s
 2. Kodeky: vypnout video, nechat jen **PCMA/PCMU** (malé INVITE se nemusí
@@ -155,7 +163,7 @@ dokumentace. Poctivá tabulka:
 | Přání | Jde? | Jak / proč ne |
 |---|---|---|
 | Hovory přes handsfree (klasické **Bluetooth HFP**) | **ANO** | Linphone 6.x má vždy zapnutou Telecom integraci (Jetpack core-telecom, self-managed calls) a AOSP Bluetooth stack self-managed hovory do HFP propouští: **vyzvánění v autě, příjem/zavěšení z volantu, zvuk přes reproduktory auta, jméno kontaktu na displeji** — bez toho, aby byl Linphone „výchozí telefon". |
-| Linphone jako **výchozí telefonní appka** | **NE (a nevadí to)** | Linphone záměrně neimplementuje ROLE_DIALER/InCallService („it isn't a phone app", issue #1005). Pro HFP to není potřeba (viz výše). Důsledky: hovory nejsou v systémovém call logu → „poslední hovory" v autě (PBAP) zůstanou prázdné; historie je v Linphone. Vytáčení z UI auta nejde (telefon bez SIM nemá PSTN účet) — vytáčej z telefonu. |
+| Linphone jako **telefonní účet systému** | **NE (volba Linphonu, ne limit Androidu)** | Linphone jede v režimu *self-managed* a záměrně neimplementuje ROLE_DIALER/InCallService („it isn't a phone app", issue #1005). Pro HFP to není potřeba (viz výše). Důsledky: hovory nejsou v systémovém call logu → „poslední hovory" v autě (PBAP) zůstanou prázdné a z UI auta se nevytáčí; historie je v Linphone. Klient, který se registruje jako **call provider** (PhoneAccount s CAPABILITY_CALL_PROVIDER), by obojí odemkl — systémový vytáčeč by nabídl „volat přes…" a hovory by padaly do call logu. Jestli to některý z komerčních klientů (Zoiper, Acrobits) na Androidu opravdu dělá, **neověřeno** — jejich marketing to tvrdí, důkaz chybí; test je hodinová záležitost ve vedlejším profilu. Pozor: tyhle klienty stojí běh na pozadí na vlastním push serveru, který se k naší bráně v privátní síti nedostane — musely by jet bez pushe. |
 | **Android Auto** (obrazovka auta) | **NE** | Dva nezávislé blokery: (1) AA klient tvrdě závisí na Google Play — na GrapheneOS jde jen se sandboxed Play, bez něj vůbec; (2) VoIP volání v AA je u Googlu closed beta — Linphone kód má, ale zakomentovaný („Google hasn't granted us access yet", issue #2216). |
 | **SMS v autě** (čtení/odpověď) | **NE** (BT), podmíněně (AA) | Bluetooth MAP servíruje jen skutečnou SMS databázi telefonu — SIP MESSAGE chaty do ní nelze podporovaně dostat. AA messaging by fungoval (Linphone má MessagingStyle+reply hotové od 5.0.3), ale AA bez Play neběží — viz výše. |
 
@@ -166,6 +174,5 @@ zůstávají na telefonu v Linphone. Kdyby ses někdy rozhodl pro sandboxed
 Play, otevře se AA předčítání/odpovídání zpráv — hovory v AA ale ne (Google
 beta).
 
-Pozn. k verzi: F-Droid build 6.0.21 je pro všechno výše dostačující
-(Telecom fix pro Android <13 z 6.0.23 se GrapheneOS netýká — běží na
-novějším Androidu).
+Pozn. k verzi: ověřeno na F-Droid buildu Linphone 6.0.21 (Telecom fix pro
+Android <13 z 6.0.23 se GrapheneOS netýká — běží na novějším Androidu).
