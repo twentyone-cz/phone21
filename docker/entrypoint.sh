@@ -84,7 +84,10 @@ render() {
   chmod 0755 "$DATA" "$DATA/queue" 2>/dev/null || true
   chmod 0777 "$DATA/ts" 2>/dev/null || true
   chmod 0644 "$DATA/journal.jsonl" 2>/dev/null || true
-  chmod 0600 "$SECRETS" 2>/dev/null || true
+  # webui (běží jako nobody) potřebuje SIP i AMI heslo — dáme mu přístup
+  # přes skupinu, ne pro celý svět
+  chgrp 65534 "$SECRETS" 2>/dev/null || true
+  chmod 0640 "$SECRETS" 2>/dev/null || true
   log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
 }
 

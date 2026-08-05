@@ -339,7 +339,8 @@ PAGE = PAGE.replace("{brand_plain}", "jednadvacet phone" if GUI else "GSM2SIP")
 
 def render(active, body):
     if GUI:
-        tabs = [("/", "home", "Domů"), ("/sms", "sms", "Zprávy")]
+        tabs = [("/", "home", "Domů"), ("/sms", "sms", "Zprávy"),
+                ("/telefon", "phone", "Telefon")]
         if TS_DIR:
             tabs.append(("/net", "net", "Síť"))
         tabs.append(("/stav", "status", "Pokročilé"))
@@ -347,7 +348,8 @@ def render(active, body):
                       (h, "act" if active == k else "", t) for h, k, t in tabs)
         return PAGE.format(nav=nav, brand="jednadvacet <b>phone</b>",
                            body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
-    tabs = [("/", "status", "Stav"), ("/sms", "sms", "SMS")]
+    tabs = [("/", "status", "Stav"), ("/sms", "sms", "SMS"),
+            ("/telefon", "phone", "Telefon")]
     if TS_DIR:
         tabs.append(("/net", "net", "Síť"))
     tabs.append(("/diag", "diag", "Diagnostika"))
@@ -398,23 +400,24 @@ def page_home(info=""):
             % esc(m.get("State")))
     else:
         tiles.append(
-            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big bad">Nedostupné</div>'
-            '<small>ústředna nekomunikuje — detail v <a href="/stav">Pokročilé</a></small></div>')
+            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big bad">Neznámý stav</div>'
+            "<small>nelze se zeptat ústředny (AMI) — modem může běžet; "
+            'detail v <a href="%s">Pokročilé</a></small></div>' % u("/stav"))
     ip = ts_ip()
     if ip:
         tiles.append(
             '<div class="tile"><h3>🔒 Privátní síť</h3><div class="big ok">Připojeno</div>'
-            "<small>adresa krabičky: <b>%s</b> · <a href=\"/net\">detail</a></small></div>" % esc(ip))
+            "<small>adresa krabičky: <b>%s</b> · <a href=\"%s\">detail</a></small></div>" % (esc(ip), u("/net")))
     else:
         tiles.append(
             '<div class="tile"><h3>🔒 Privátní síť</h3><div class="big warn">Nepřipojeno</div>'
-            '<small><a href="/net">vlož klíč privátní sítě</a> — telefon se pak dovolá odkudkoli</small></div>')
+            '<small><a href="%s">vlož klíč privátní sítě</a> — telefon se pak dovolá odkudkoli</small></div>' % u("/net"))
     sec = read_secrets()
     if ip and sec.get("SIP_USER"):
         tiles.append(
             '<div class="tile"><h3>📱 Telefon</h3><div class="big ok">Připraveno</div>'
-            '<small>přihlašovací údaje pro aplikaci najdeš v <a href="/net">Síť</a>; '
-            'návod: <a href="https://phone.twentyone.cz/instalace" target="_blank">instalace</a></small></div>')
+            '<small>připoj ho na záložce <a href="%s">Telefon</a>; ' % u("/telefon") +
+            '<small>návod: <a href="https://phone.twentyone.cz/instalace" target="_blank">instalace</a></small></div>')
     else:
         tiles.append(
             '<div class="tile"><h3>📱 Telefon</h3><div class="big warn">Čeká</div>'
@@ -423,7 +426,7 @@ def page_home(info=""):
     last = rows[0] if rows else None
     tiles.append(
         '<div class="tile"><h3>💬 Zprávy</h3><div class="big">%s</div>'
-        '<small>%s · <a href="/sms">všechny zprávy</a></small></div>'
+        '<small>%s · <a href="' + u("/sms") + '">všechny zprávy</a></small></div>'
         % ((esc(last["from"]) if last else "—"),
            (esc(last["msg"][:60]) if last else "zatím žádné")))
     mode = get_missed_mode()
@@ -534,21 +537,46 @@ def page_net(info=""):
         "<button>Připojit</button></form>"
         % ("Nové připojení / obnova po expiraci — vlož" if ip else
            "Brána zatím není v privátní síti. Vlož", esc(dash)))
-    if ip and sec.get("SIP_USER"):
+    if ip:
         blocks.append(
-            "<h2>Připojení telefonu</h2>"
-            "<p>Telefon musí být ve stejné privátní síti (aplikace privátní "
-            "sítě + klíč zařízení). Pak stačí naskenovat kód:</p>"
-            '<form class="inline" method="post" action="%s">'
-            "<button>Zobrazit QR pro Linphone</button></form>"
-            '<details><summary>Nebo zadat ručně</summary>'
-            "<table><tr><th>Uživatel</th><td>%s</td></tr>"
-            "<tr><th>Heslo</th><td><code>%s</code></td></tr>"
-            "<tr><th>Doména/server</th><td>%s</td></tr>"
-            "<tr><th>Transport</th><td>UDP</td></tr></table></details>"
-            % (u("/net/qr"), esc(sec["SIP_USER"]),
-               esc(sec.get("SIP_PASSWORD", "")), esc(ip)))
+            '<p>Krabička je v síti — teď připoj telefon na záložce '
+            '<a href="%s">Telefon</a>.</p>' % u("/telefon"))
     return render("net", "".join(blocks))
+
+
+def page_phone(info=""):
+    """Připojení softphonu: QR pro Linphone + ruční údaje."""
+    sec = read_secrets()
+    ip = ts_ip()
+    blocks = [info, "<h1>Telefon</h1>"]
+    if not sec.get("SIP_USER"):
+        blocks.append('<p class="bad">Nejde přečíst přihlašovací údaje '
+                      "brány — zkus restartovat aplikaci.</p>")
+        return render("phone", "".join(blocks))
+    if not ip:
+        blocks.append(
+            '<p class="warn">Krabička zatím není v privátní síti, takže se '
+            "k ní telefon zvenku nedovolá. Připoj ji na záložce "
+            '<a href="%s">Síť</a> — pak se sem vrať.</p>' % u("/net"))
+    blocks.append(
+        "<p>Do telefonu si nainstaluj <b>Linphone</b> a naskenuj kód — "
+        "účet, heslo i adresa brány se nastaví samy:</p>"
+        '<form class="inline" method="post" action="%s">'
+        "<button>Zobrazit QR pro Linphone</button></form>"
+        "<p class=\"small muted\">Návod krok za krokem: "
+        '<a href="https://phone.twentyone.cz/instalace" target="_blank">'
+        "phone.twentyone.cz/instalace</a></p>"
+        "<details><summary>Nastavit ručně</summary>"
+        "<table><tr><th>Uživatel</th><td>%s</td></tr>"
+        "<tr><th>Heslo</th><td><code>%s</code></td></tr>"
+        "<tr><th>Doména / server</th><td>%s</td></tr>"
+        "<tr><th>Transport</th><td>UDP</td></tr></table>"
+        "<p class=\"small muted\">V nastavení hovorů vypni video a nech jen "
+        "kodeky PCMA/PCMU; aplikaci povol běh na pozadí (baterie: neomezeno), "
+        "jinak tě hovor nemusí dozvonit.</p></details>"
+        % (u("/telefon/qr"), esc(sec["SIP_USER"]),
+           esc(sec.get("SIP_PASSWORD", "")), esc(ip or "—")))
+    return render("phone", "".join(blocks))
 
 
 def page_qr(url):
@@ -630,6 +658,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_status())
         if self.path == "/sms":
             return self._html(page_sms())
+        if self.path == "/telefon":
+            return self._html(page_phone())
         if self.path == "/net" and TS_DIR:
             return self._html(page_net())
         if self.path.startswith("/static/"):
@@ -679,11 +709,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 info = '<p class="bad">AMI chyba: %s</p>' % esc(e)
             return self._html(page_sms(info))
-        if self.path == "/net/qr" and TS_DIR:
+        if self.path == "/telefon/qr":
             ip = ts_ip()
             if not ip:
-                return self._html(page_net(
-                    '<p class="bad">Nejdřív připoj krabičku do privátní sítě.</p>'))
+                return self._html(page_phone(
+                    '<p class="bad">Nejdřív připoj krabičku do privátní sítě '
+                    "(záložka Síť).</p>"))
             url = "http://%s:%d/prov/%s.xml" % (ip, PROV_PORT, prov_new_token())
             return self._html(page_qr(url))
         if self.path == "/net/authkey" and TS_DIR:
