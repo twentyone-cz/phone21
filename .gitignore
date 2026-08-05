@@ -3,5 +3,9 @@
 runtime/
 __pycache__/
 
-# Interní: nasazení, provozní zápisky, handoffy — na veřejný GitHub nepatří
-docs/
+# Interní: konkrétní nasazení, provozní zápisky a handoffy mezi projekty.
+# Obecná dokumentace (jak to funguje, návody) do repa PATŘÍ — viz docs/*.md.
+docs/lxc-deploy.md
+docs/cockscale-integrace.md
+docs/vyvoj-log.md
+docs/telefon-gos.md

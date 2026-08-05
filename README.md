@@ -63,6 +63,15 @@ web/phone/    produktové stránky
 Konfigurace se generuje ze šablon: v Dockeru/Umbrelu si ji kontejner vyrobí
 sám při startu (`GSM2SIP_SELFCONFIG=1`), jinak jednorázově `./configure.sh`.
 
+## Dokumentace
+
+- [`docs/telefon.md`](docs/telefon.md) — nastavení telefonu: kontakty, klient,
+  transport, spolehlivé doručování
+- [`docs/technicke-poznamky.md`](docs/technicke-poznamky.md) — proč audio jde
+  přes sériový PCM port, `-Bsymbolic` u chan_quectel, VoLTE a carrier profily
+  (MBN), pasti v dialplanu a call files
+- [`docs/faq.md`](docs/faq.md) — časté otázky a řešené problémy
+
 ## Soukromí
 
 Hovory a SMS jdou z brány do běžné mobilní sítě přes tvého operátora — ten je
