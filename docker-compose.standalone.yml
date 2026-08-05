@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: it-one.cz/21/gsm2sip-asterisk:0.9.1
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.3
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -52,7 +52,7 @@ services:
       - ./data/astlog:/var/log/asterisk
 
   webui:
-    image: it-one.cz/21/gsm2sip-webui:0.9.0
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.3
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped

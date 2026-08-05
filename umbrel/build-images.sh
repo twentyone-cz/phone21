@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GSM2SIP — build a push multi-arch (amd64/arm64) obrazů pro Umbrel appku
-# do Gitea container registry (it-one.cz).
+# do GitHub Container Registry (ghcr.io).
 #
 # Spouštět na stroji s dockerem (LXC brány). Předpoklady:
 #   - docker buildx s builderem umějícím --push (docker-container driver):
@@ -8,7 +8,7 @@
 #   - qemu binfmt pro arm64 (jednorázově, registruje handlery v kernelu
 #     SDÍLENÉM s Proxmox hostem):
 #       docker run --privileged --rm tonistiigi/binfmt --install arm64
-#   - docker login it-one.cz (účet s write:package tokenem)
+#   - docker login ghcr.io (PAT se scope write:packages)
 #
 # Použití:
 #   VERSION=0.9.0 ./umbrel/build-images.sh
@@ -19,7 +19,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-REGISTRY="${REGISTRY:-it-one.cz/21}"
+REGISTRY="${REGISTRY:-ghcr.io/twentyone-cz}"
 VERSION="${VERSION:?nastav VERSION, např. VERSION=0.9.0}"
 PLATFORMS="linux/amd64,linux/arm64"
 

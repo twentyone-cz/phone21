@@ -50,13 +50,13 @@
 <p><b>A) umbrelOS (doporučeno — Raspberry Pi i x86):</b></p>
 <ol class="steps">
   <li>V umbrelOS otevři <i>App Store → ⋯ → Community App Stores</i> → vlož
-  <code>https://it-one.cz/git/Eddie/umbrel-store</code> → Add.</li>
+  <code>https://github.com/twentyone-cz/umbrel-store</code> → Add.</li>
   <li>Nainstaluj appku <b>GSM2SIP</b>.</li>
   <li>Zapoj USB modem se SIM a otevři appku — o zbytek se postará sama.</li>
 </ol>
 
 <p><b>B) Obecný Docker (jakýkoli Linux):</b></p>
-<pre>git clone https://it-one.cz/git/21/Gsm2Sip && cd Gsm2Sip
+<pre>git clone https://github.com/twentyone-cz/gsm2sip && cd gsm2sip
 mkdir -p data/{smsdata,spool,astlog,ts-state}
 WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d</pre>
 <p>Web rozhraní krabičky pak běží na <code>http://adresa-serveru:8090</code>.</p>
@@ -109,7 +109,7 @@ přepínač v rozhraní.</p>
   <p>Aplikace třetích stran mají vlastní telemetrii: u Tailscale appky
   doporučujeme zablokovat doménu <code>log.tailscale.io</code> (privátní
   DNS/blokátor) — krabička má telemetrii vypnutou už z výroby. Všechno je
-  open source — <a href="https://it-one.cz/git/21/Gsm2Sip">ověř si nás</a>.</p>
+  open source — <a href="https://github.com/twentyone-cz/gsm2sip">ověř si nás</a>.</p>
 </div>
 
 <footer>

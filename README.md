@@ -36,7 +36,7 @@ Fází 1–5 jako **samostatný compose stack** (mimo umbreld) — funguje v obo
 architekturách beze změny, liší se jen místo, kam se generuje konfigurace.
 
 **Community store žije v samostatném repu**
-[`Eddie/umbrel-store`](https://it-one.cz/git/Eddie/umbrel-store) (id `eddie`,
+[`Eddie/umbrel-store`](https://github.com/twentyone-cz/umbrel-store) (id `eddie`,
 stejný vzor jako med-O-mat): tam patří jen `umbrel-app-store.yml` + adresáře
 appek. Zdrojová podoba appek žije tady v projektovém repu a do storu se
 kopíruje při publikaci. Store repo musí zůstat veřejné — umbreld ho klonuje
@@ -47,7 +47,7 @@ anonymně přes HTTPS.
 1. Zkopírovat `eddie-passthrough-test/` z tohoto repa do kořene
    `Eddie/umbrel-store` a pushnout.
 2. Umbrel UI → App Store → menu (⋮) → **Community App Stores** →
-   `https://it-one.cz/git/Eddie/umbrel-store` (pokud tam z med-O-matu už je,
+   `https://github.com/twentyone-cz/umbrel-store` (pokud tam z med-O-matu už je,
    jen Update) → Open → nainstalovat **Passthrough Test (Fáze 0.5)**.
 3. Přečíst výsledek (předpoklad: modem připojen — `host-setup.sh` krok 2 OK):
    ```bash
