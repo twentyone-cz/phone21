@@ -4,7 +4,7 @@
      char* dest = ast_strdupa(to);
      strsep(&dest, ":");
  
--    if (interní API(msg)) {
+-    if (ast_msg_has_destination(msg)) {
 +    const char* const msg_to   = ast_msg_get_to(msg);
 +    const char* const msg_body = ast_msg_get_body(msg);
 +
