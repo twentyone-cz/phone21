@@ -40,6 +40,13 @@ GUI = UI_MODE == "gui"
 # Linphone konfiguraci nestáhl) — chrání ho jednorázový token s krátkou
 # platností. Port se publikuje přímo, ne přes proxy s přihlášením.
 PROV_PORT = int(os.environ.get("PROV_PORT", "8091"))
+# Prefix pro interní odkazy (kdyby UI běželo za proxy pod cestou)
+BASE = os.environ.get("BASE_PATH", "").rstrip("/")
+
+
+def u(path):
+    return BASE + path
+
 PROV_TTL = 600
 
 
@@ -416,8 +423,9 @@ def page_home(info=""):
     if ip and sec.get("SIP_USER"):
         tiles.append(
             '<div class="tile"><h3>📱 Telefon</h3><div class="big ok">Připraveno</div>'
-            '<small>připoj ho na záložce <a href="%s">Telefon</a>; ' % u("/telefon") +
-            '<small>návod: <a href="https://phone.twentyone.cz/instalace" target="_blank">instalace</a></small></div>')
+            '<small>připoj ho na záložce <a href="%s">Telefon</a> · návod: '
+            '<a href="https://phone.twentyone.cz/instalace" target="_blank">'
+            "instalace</a></small></div>" % u("/telefon"))
     else:
         tiles.append(
             '<div class="tile"><h3>📱 Telefon</h3><div class="big warn">Čeká</div>'
@@ -426,9 +434,10 @@ def page_home(info=""):
     last = rows[0] if rows else None
     tiles.append(
         '<div class="tile"><h3>💬 Zprávy</h3><div class="big">%s</div>'
-        '<small>%s · <a href="' + u("/sms") + '">všechny zprávy</a></small></div>'
+        '<small>%s · <a href="%s">všechny zprávy</a></small></div>'
         % ((esc(last["from"]) if last else "—"),
-           (esc(last["msg"][:60]) if last else "zatím žádné")))
+           (esc(last["msg"][:60]) if last else "zatím žádné"),
+           u("/sms")))
     mode = get_missed_mode()
     modeform = (
         '<form class="inline" method="post" action="/missed-mode">'
@@ -596,10 +605,11 @@ obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší, vygener
 si nový.</p>
 <p class="mono small" style="word-break:break-all">%s</p>
 <p><a href="%s">Zpět</a></p>""" % (esc(url), u("/net"))
-    return page("Připojení telefonu", body, """<script>
+    body += """<script src="%s"></script><script>
 new QRCode(document.getElementById("qr"), {text: %s, width: 260, height: 260,
   correctLevel: QRCode.CorrectLevel.M});
-</script>""" % json.dumps(url))
+</script>""" % (u("/static/qrcode.min.js"), json.dumps(url))
+    return render("phone", body)
 
 
 def page_diag(at_info=""):
