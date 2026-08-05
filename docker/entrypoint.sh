@@ -84,6 +84,11 @@ render() {
   chmod 0755 "$DATA" "$DATA/queue" 2>/dev/null || true
   chmod 0777 "$DATA/ts" 2>/dev/null || true
   chmod 0644 "$DATA/journal.jsonl" 2>/dev/null || true
+  # log Asterisku (volume bývá založený rootem — bez tohohle se nezapisuje
+  # a Diagnostika ve web UI zůstane prázdná)
+  chown -R asterisk /var/log/asterisk 2>/dev/null || \
+    chmod 0777 /var/log/asterisk 2>/dev/null || true
+  chmod 0644 /var/log/asterisk/messages.log 2>/dev/null || true
   # webui (běží jako nobody) potřebuje SIP i AMI heslo — dáme mu přístup
   # přes skupinu, ne pro celý svět
   chgrp 65534 "$SECRETS" 2>/dev/null || true

@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.10
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.11
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -59,7 +59,7 @@ services:
     # (Linphone se neumí přihlásit), chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.10
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.11
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped
