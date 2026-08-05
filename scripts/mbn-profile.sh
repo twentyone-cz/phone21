@@ -9,7 +9,8 @@
 # Volbu je potřeba po startu obnovovat (dělá install-mbn.sh přes systemd).
 #
 # Nastavení v .env brány:
-#   MBN_PROFILE=auto        # default: vybrat z tabulky podle home network SIM
+#   MBN_MAP="230-1=NázevProfilu,..."   # mapování operátor → profil
+#   MBN_PROFILE=auto        # default: vybrat podle MBN_MAP dle SIM
 #   MBN_PROFILE=off         # nic neměnit (nechat autoselect)
 #   MBN_PROFILE=<Description>  # vynutit konkrétní profil (viz `list`)
 #
@@ -21,6 +22,7 @@
 set -u
 DEV="${MBN_QMI_DEV:-/dev/cdc-wdm0}"
 WANT="${MBN_PROFILE:-auto}"
+MBN_MAP="${MBN_MAP:-}"
 
 log() { echo "$(date -Is) $*"; }
 die() { log "CHYBA: $*" >&2; exit 1; }
@@ -45,16 +47,16 @@ id_by_desc() { # $1 = Description
   list_raw | awk -v want="$1" '/Description:/{d=$2} /ID:/{if (d==want) print $2}'
 }
 
-# Tabulka operátor (MCC-MNC domácí sítě SIM) → profil. Názvy musí odpovídat
-# hodnotám z `mbn-profile.sh list` na konkrétním firmwaru.
+# Mapování operátor → profil se bere z .env (MBN_MAP), protože správná
+# dvojice je věc konkrétního firmwaru a SIM. Formát:
+#   MBN_MAP="<MCC>-<MNC>=<NázevProfilu>,<MCC>-<MNC>=<NázevProfilu>"
+# Názvy profilů zjistíš na svém modemu: `mbn-profile.sh list`.
 profile_for_operator() {
-  case "$1" in
-    230-1)  echo "profil" ;;
-    262-1)  echo "profil" ;;
-    262-2)  echo "profil" ;;
-    230-3)  echo "profil" ;;
-    *)      echo "" ;;
-  esac
+  local want="$1" pair
+  for pair in ${MBN_MAP//,/ }; do
+    [[ "${pair%%=*}" == "$want" ]] && { echo "${pair#*=}"; return; }
+  done
+  echo ""
 }
 
 home_network() {
