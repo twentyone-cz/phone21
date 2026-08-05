@@ -78,9 +78,13 @@ render() {
     && mv /tmp/manager.conf.new /etc/asterisk/manager.conf
   mkdir -p "$DATA/queue" "$DATA/ts"
   chown -R asterisk "$DATA" /etc/asterisk 2>/dev/null || true
-  # do ts/ zapisuje i webui, které běží pod jiným uživatelem (na Umbrelu
-  # nobody) — samotný klíč si ukládá s právy 600
+  # Web UI běží pod jiným uživatelem než Asterisk (na Umbrelu nobody):
+  # data musí umět přečíst (fronta, žurnál) a do ts/ i zapsat (klíč sítě,
+  # ten si ukládá s právy 600). Tajemství zůstávají jen pro Asterisk.
+  chmod 0755 "$DATA" "$DATA/queue" 2>/dev/null || true
   chmod 0777 "$DATA/ts" 2>/dev/null || true
+  chmod 0644 "$DATA/journal.jsonl" 2>/dev/null || true
+  chmod 0600 "$SECRETS" 2>/dev/null || true
   log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
 }
 

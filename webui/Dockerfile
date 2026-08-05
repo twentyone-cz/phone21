@@ -6,5 +6,6 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends qrencode \
  && rm -rf /var/lib/apt/lists/*
 COPY app.py /app/app.py
+COPY static/ /app/static/
 USER nobody
 CMD ["python3", "/app/app.py"]

@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.4
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.5
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -55,7 +55,11 @@ services:
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.4
+    # 8091 = provisioning softphonu: musí být dosažitelný z telefonu přímo
+    # (Linphone se neumí přihlásit), chrání ho jednorázový token
+    ports:
+      - "8091:8091"
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.5
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped

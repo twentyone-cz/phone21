@@ -36,6 +36,11 @@ TS_DIR = os.environ.get("TS_DIR", "")
 # "gui" = spotřebitelský dashboard (Umbrel appka) s technikou pod Pokročilé.
 UI_MODE = os.environ.get("UI_MODE", "expert")
 GUI = UI_MODE == "gui"
+# Provisioning pro softphone: běží na vlastním portu BEZ hesla (jinak by si
+# Linphone konfiguraci nestáhl) — chrání ho jednorázový token s krátkou
+# platností. Port se publikuje přímo, ne přes proxy s přihlášením.
+PROV_PORT = int(os.environ.get("PROV_PORT", "8091"))
+PROV_TTL = 600
 
 
 def read_secrets():
@@ -148,6 +153,68 @@ def normalize_msisdn(num, cc=None):
     return num
 
 
+_prov_tokens = {}          # token -> (expiruje, použito)
+_prov_lock = threading.Lock()
+
+
+def prov_new_token():
+    """Jednorázový token pro stažení konfigurace softphonem."""
+    token = base64.urlsafe_b64encode(os.urandom(18)).decode().rstrip("=")
+    with _prov_lock:
+        now = time.time()
+        for t, (exp, _used) in list(_prov_tokens.items()):
+            if exp < now:
+                del _prov_tokens[t]
+        _prov_tokens[token] = (now + PROV_TTL, False)
+    return token
+
+
+def prov_claim(token):
+    """Ověří a spotřebuje token (jedno stažení)."""
+    with _prov_lock:
+        entry = _prov_tokens.get(token)
+        if not entry or entry[0] < time.time() or entry[1]:
+            return False
+        _prov_tokens[token] = (entry[0], True)
+        return True
+
+
+def prov_xml(domain):
+    """Konfigurace účtu pro Linphone (remote provisioning)."""
+    sec = read_secrets()
+    user = sec.get("SIP_USER", SIP_USER)
+    password = sec.get("SIP_PASSWORD", "")
+    ident = "sip:%s@%s" % (user, domain)
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns="http://www.linphone.org/xsds/lpconfig.xsd">
+  <section name="proxy_0">
+    <entry name="reg_proxy">&lt;sip:%(domain)s;transport=udp&gt;</entry>
+    <entry name="reg_identity">%(ident)s</entry>
+    <entry name="reg_expires">600</entry>
+    <entry name="reg_sendregister">1</entry>
+    <entry name="publish">0</entry>
+    <entry name="dial_escape_plus">0</entry>
+  </section>
+  <section name="auth_info_0">
+    <entry name="username">%(user)s</entry>
+    <entry name="userid">%(user)s</entry>
+    <entry name="passwd">%(passwd)s</entry>
+    <entry name="domain">%(domain)s</entry>
+  </section>
+  <section name="video">
+    <entry name="capture">0</entry>
+    <entry name="display">0</entry>
+    <entry name="automatically_initiate">0</entry>
+    <entry name="automatically_accept">0</entry>
+  </section>
+  <section name="sip">
+    <entry name="register_only_when_network_is_up">1</entry>
+  </section>
+</config>
+""" % {"domain": html.escape(domain), "ident": html.escape(ident),
+       "user": html.escape(user), "passwd": html.escape(password)}
+
+
 MISSED_MODES = ("ring", "announce")
 
 
@@ -185,8 +252,8 @@ def read_journal(limit=200):
                 })
             except Exception:
                 continue
-    except FileNotFoundError:
-        pass
+    except OSError:
+        pass  # nečitelná data nesmí shodit stránku
     return rows
 
 
@@ -207,7 +274,7 @@ def read_queue():
                     "from": sms.get("from", "?"),
                     "msg": sms.get("msg", ""),
                 })
-    except FileNotFoundError:
+    except OSError:
         pass
     return items
 
@@ -219,7 +286,7 @@ def read_watchdog(n=5):
         with open(os.path.join(DATA_DIR, "watchdog.log"), "rb") as f:
             return [ln.decode(errors="replace").rstrip()
                     for ln in f.readlines()[-n:]]
-    except FileNotFoundError:
+    except OSError:
         return []
 
 
@@ -227,8 +294,8 @@ def tail_log(n=120):
     try:
         with open(LOG_FILE, "rb") as f:
             return b"\n".join(f.readlines()[-n:]).decode(errors="replace")
-    except FileNotFoundError:
-        return "(log %s neexistuje — zkontroluj logger.conf a volume)" % LOG_FILE
+    except OSError:
+        return "(log %s není k dispozici)" % LOG_FILE
 
 
 # Barvy: expert = zelený terminálový vzhled, gui = jednadvacet oranžová.
@@ -469,15 +536,42 @@ def page_net(info=""):
            "Brána zatím není v privátní síti. Vlož", esc(dash)))
     if ip and sec.get("SIP_USER"):
         blocks.append(
-            "<h2>Nastavení softphonu (Linphone)</h2>"
+            "<h2>Připojení telefonu</h2>"
+            "<p>Telefon musí být ve stejné privátní síti (aplikace privátní "
+            "sítě + klíč zařízení). Pak stačí naskenovat kód:</p>"
+            '<form class="inline" method="post" action="%s">'
+            "<button>Zobrazit QR pro Linphone</button></form>"
+            '<details><summary>Nebo zadat ručně</summary>'
             "<table><tr><th>Uživatel</th><td>%s</td></tr>"
             "<tr><th>Heslo</th><td><code>%s</code></td></tr>"
             "<tr><th>Doména/server</th><td>%s</td></tr>"
-            "<tr><th>Transport</th><td>UDP</td></tr></table>"
-            "<small>Telefon musí být ve stejné privátní síti "
-            "(aplikace privátní sítě + tvůj klíč zařízení).</small>"
-            % (esc(sec["SIP_USER"]), esc(sec.get("SIP_PASSWORD", "")), esc(ip)))
+            "<tr><th>Transport</th><td>UDP</td></tr></table></details>"
+            % (u("/net/qr"), esc(sec["SIP_USER"]),
+               esc(sec.get("SIP_PASSWORD", "")), esc(ip)))
     return render("net", "".join(blocks))
+
+
+def page_qr(url):
+    """QR s odkazem na konfiguraci — Linphone: Asistent → Načíst vzdálenou
+    konfiguraci → naskenovat."""
+    body = """<h1>Připojení telefonu</h1>
+<ol>
+<li>V telefonu otevři <b>Linphone</b> (nainstaluj z obchodu, pokud ho nemáš).</li>
+<li>V úvodním průvodci zvol <b>Načíst vzdálenou konfiguraci</b>
+(„Fetch Remote Configuration") → <b>naskenovat QR kód</b>.
+Máš-li už Linphone rozběhaný: Nastavení → Účty → přidat účet → tatáž volba.</li>
+<li>Namiř foťák sem:</li>
+</ol>
+<div id="qr" class="qr"></div>
+<p class="small muted">Odkaz platí <b>10 minut</b> a jen na jedno použití;
+obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší, vygeneruj
+si nový.</p>
+<p class="mono small" style="word-break:break-all">%s</p>
+<p><a href="%s">Zpět</a></p>""" % (esc(url), u("/net"))
+    return page("Připojení telefonu", body, """<script>
+new QRCode(document.getElementById("qr"), {text: %s, width: 260, height: 260,
+  correctLevel: QRCode.CorrectLevel.M});
+</script>""" % json.dumps(url))
 
 
 def page_diag(at_info=""):
@@ -538,6 +632,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_sms())
         if self.path == "/net" and TS_DIR:
             return self._html(page_net())
+        if self.path.startswith("/static/"):
+            return self.get_static(self.path)
         if self.path == "/diag":
             return self._html(page_diag())
         self._html("<p>404</p>", 404)
@@ -583,6 +679,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 info = '<p class="bad">AMI chyba: %s</p>' % esc(e)
             return self._html(page_sms(info))
+        if self.path == "/net/qr" and TS_DIR:
+            ip = ts_ip()
+            if not ip:
+                return self._html(page_net(
+                    '<p class="bad">Nejdřív připoj krabičku do privátní sítě.</p>'))
+            url = "http://%s:%d/prov/%s.xml" % (ip, PROV_PORT, prov_new_token())
+            return self._html(page_qr(url))
         if self.path == "/net/authkey" and TS_DIR:
             key = form.get("authkey", "").strip()
             # auth klíče: base64-like tokeny (headscale hskey-auth-…)
@@ -605,13 +708,59 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_diag('<p class="ok">%s</p>' % esc(out)))
         self._html("<p>404</p>", 404)
 
+    def get_static(self, path):
+        name = os.path.basename(path)
+        fpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "static", name)
+        ctypes = {".css": "text/css", ".js": "application/javascript"}
+        ext = os.path.splitext(name)[1]
+        if ext not in ctypes or not os.path.isfile(fpath):
+            return self._html("<p>404</p>", 404)
+        with open(fpath, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctypes[ext])
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def log_message(self, fmt, *args):  # ať nespamuje stdout za každý request
         pass
+
+
+class ProvHandler(BaseHTTPRequestHandler):
+    """Jediný účel: vydat konfiguraci softphonu na jednorázový token.
+    Běží bez hesla (Linphone se neumí přihlásit), takže nic jiného neobsluhuje."""
+    server_version = "gsm2sip-prov"
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path
+        token = path[len("/prov/"):-len(".xml")] if (
+            path.startswith("/prov/") and path.endswith(".xml")) else ""
+        ip = ts_ip()
+        if not token or not ip or not prov_claim(token):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        data = prov_xml(ip).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/xml; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
 
 def main():
     if not WEBUI_PASSWORD:
         raise SystemExit("WEBUI_PASSWORD není nastavené — odmítám startovat bez auth.")
+    if TS_DIR:
+        prov = ThreadingHTTPServer(("0.0.0.0", PROV_PORT), ProvHandler)
+        threading.Thread(target=prov.serve_forever, daemon=True).start()
+        print("provisioning softphonu na :%d" % PROV_PORT, flush=True)
     srv = ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), Handler)
     print("gsm2sip-webui na :%d" % WEBUI_PORT, flush=True)
     srv.serve_forever()
