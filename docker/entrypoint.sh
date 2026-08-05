@@ -78,6 +78,9 @@ render() {
     && mv /tmp/manager.conf.new /etc/asterisk/manager.conf
   mkdir -p "$DATA/queue" "$DATA/ts"
   chown -R asterisk "$DATA" /etc/asterisk 2>/dev/null || true
+  # do ts/ zapisuje i webui, které běží pod jiným uživatelem (na Umbrelu
+  # nobody) — samotný klíč si ukládá s právy 600
+  chmod 0777 "$DATA/ts" 2>/dev/null || true
   log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
 }
 
@@ -102,8 +105,42 @@ watchdog_loop() {
   done
 }
 
+# Na hostiteli si QMI rozhraní modemu obvykle zabere ModemManager — pak
+# selže správa carrier profilu i ostrovní režim. Zastavíme ho přes systemd
+# D-Bus (socket musí být namountovaný); bez socketu se jen tiše přeskočí.
+mm_release() {
+  [[ -S /run/dbus/system_bus_socket ]] || return 0
+  command -v dbus-send >/dev/null || return 0
+  for unit in ModemManager.service; do
+    dbus-send --system --print-reply --dest=org.freedesktop.systemd1 \
+      /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager.StopUnit \
+      string:"$unit" string:replace >/dev/null 2>&1 && log "zastaven $unit"
+  done
+}
+
+qmi_ok() { timeout 15 qmicli -d /dev/cdc-wdm0 --dms-get-model >/dev/null 2>&1; }
+
+# QMI umí po cizím klientovi zůstat zaseknuté (endpoint hangup) — pak pomůže
+# jen reset modemu. Po resetu se USB znovu vyčísluje, chvíli to trvá.
+qmi_recover() {
+  qmi_ok && return 0
+  mm_release
+  sleep 5
+  qmi_ok && return 0
+  log "QMI neodpovídá — resetuji modem"
+  asterisk -rx "quectel cmd quectel0 AT+CRESET" >/dev/null 2>&1 || return 1
+  for _ in $(seq 1 20); do
+    sleep 10
+    qmi_ok && { log "QMI po resetu v pořádku"; return 0; }
+  done
+  log "POZOR: QMI se nepodařilo probrat"
+  return 1
+}
+
 mbn_loop() {
-  # držení MBN profilu (autoselect ho po resetu modemu vrací)
+  sleep 30              # Asterisk musí být nahoře (reset jde přes CLI)
+  mm_release
+  qmi_recover || true
   while true; do
     if [[ -c /dev/cdc-wdm0 ]]; then
       MBN_PROFILE="${MBN_PROFILE:-auto}" /opt/gsm2sip/scripts/mbn-profile.sh auto || true

@@ -29,7 +29,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # libqmi-utils: správa modemu přes QMI; iproute2/iputils: ostrovní režim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       asterisk asterisk-core-sounds-en-gsm tzdata libqmi-utils \
-      iproute2 iputils-ping \
+      iproute2 iputils-ping dbus \
     && rm -rf /var/lib/apt/lists/* \
     # přístup na sériové porty (gid 20 = dialout)
     && usermod -aG dialout asterisk

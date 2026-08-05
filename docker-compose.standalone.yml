@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.3
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.4
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -50,9 +50,12 @@ services:
       - ./data/smsdata:/var/lib/gsm2sip
       - ./data/spool:/var/spool/asterisk/outgoing
       - ./data/astlog:/var/log/asterisk
+      # systemd D-Bus hostitele: appka si tím uvolní QMI rozhraní modemu
+      # (na většině systémů ho drží ModemManager)
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.3
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.4
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped

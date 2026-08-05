@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.3@sha256:db25c788b48065a62551b002ea45a4d926e16e0c30451db6308484b159ee8e7c
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.4
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
     environment:
@@ -41,9 +41,12 @@ services:
       - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip
       - ${APP_DATA_DIR}/data/spool:/var/spool/asterisk/outgoing
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk
+      # systemd D-Bus hostitele: appka si tím uvolní QMI rozhraní modemu
+      # (na většině systémů ho drží ModemManager)
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.3@sha256:078d6bcb6c2e76d837d2dc3e3a6e158022aa1f880761290ccdcc127dfa1f727a
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.4
     restart: on-failure
     environment:
       TZ: ${TZ:-Europe/Prague}
