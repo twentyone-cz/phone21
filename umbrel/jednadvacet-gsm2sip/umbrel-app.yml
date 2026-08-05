@@ -1,7 +1,7 @@
 manifestVersion: 1
-id: eddie-gsm2sip
+id: jednadvacet-gsm2sip
 category: networking
-name: GSM2SIP
+name: jednadvacet phone
 version: "0.9.3"
 tagline: Vlastní GSM brána — hovory a SMS z tvé SIM kamkoli přes SIP
 description: >-
@@ -21,7 +21,7 @@ description: >-
   GSM2SIP turns a USB LTE modem with your SIM card into a private phone
   gateway: calls and SMS from your number reach a softphone anywhere via
   a private encrypted network — no public IP, no port forwarding needed.
-developer: Eddie
+developer: jednadvacet
 website: https://github.com/twentyone-cz/gsm2sip
 dependencies: []
 repo: https://github.com/twentyone-cz/gsm2sip
@@ -31,7 +31,7 @@ gallery: []
 path: ""
 defaultUsername: ""
 deterministicPassword: true
-submitter: Eddie
+submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
   První vydání pro Umbrel: kompletní brána (hovory, SMS, zmeškané hovory,

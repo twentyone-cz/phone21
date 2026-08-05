@@ -14,7 +14,7 @@
 #   VERSION=0.9.0 ./umbrel/build-images.sh
 #
 # Po pushi vypíše digesty — před publikací appky připnout v
-# umbrel/eddie-gsm2sip/docker-compose.yml (image@sha256:...).
+# umbrel/jednadvacet-gsm2sip/docker-compose.yml (image@sha256:...).
 
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
