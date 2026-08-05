@@ -23,10 +23,10 @@ Součást produktu [jednadvacet phone](https://phone.twentyone.cz).
 
 ## Hardware
 
-- mini-server: Raspberry Pi 4/5 (doporučeno 4 GB) nebo cokoli s Dockerem, x86 i ARM
-- USB LTE modem **výrobce modem** (varianta „E-H" — umí VoLTE i hlas přes
-  USB audio port), kvalitní 5V/3A napájení, u Pi ideálně napájený USB hub
-- SIM karta s aktivovaným VoLTE
+Mini-server (Raspberry Pi 4/5 nebo cokoli s Dockerem, x86 i ARM), podporovaný
+USB LTE modem a SIM karta s aktivovaným VoLTE. Ne každý modem se pro hlas hodí
+— výběr, napájení a nastavení modemu jsou u téhle třídy hardwaru nejotravnější
+část. Odladěné sestavy prodáváme hotové: <https://phone.twentyone.cz/obchod/>.
 
 ## Instalace
 
@@ -46,10 +46,9 @@ připojení telefonu: <https://phone.twentyone.cz/instalace>.
 
 ## Jak je to postavené
 
-Asterisk 20 + [chan_quectel](https://github.com/RoEdAl/asterisk-chan-quectel)
-(vlastní build, viz `docker/`). Audio jde přes **sériový PCM port** modemu
-(`ttyUSB4`, 8 kHz slin) — žádné USB audio, žádná ALSA; kontejner nepotřebuje
-`privileged`, stačí dva `devices:` a `group_add: ["20"]`.
+Asterisk 20 s ovladačem pro LTE modem (vlastní build, viz `docker/`), web UI
+v čisté Python stdlib nad AMI, konfigurace generovaná ze šablon. Kontejner
+neběží privilegovaně — dostane jen sériové porty modemu.
 
 ```
 asterisk/     šablony konfigurace (tokeny se dosazují z .env / entrypointem)
@@ -67,9 +66,6 @@ sám při startu (`GSM2SIP_SELFCONFIG=1`), jinak jednorázově `./configure.sh`.
 
 - [`docs/telefon.md`](docs/telefon.md) — nastavení telefonu: kontakty, klient,
   transport, spolehlivé doručování
-- [`docs/technicke-poznamky.md`](docs/technicke-poznamky.md) — proč audio jde
-  přes sériový PCM port, `-Bsymbolic` u chan_quectel, VoLTE a carrier profily
-  (MBN), pasti v dialplanu a call files
 - [`docs/faq.md`](docs/faq.md) — časté otázky a řešené problémy
 
 ## Soukromí

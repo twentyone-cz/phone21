@@ -31,20 +31,13 @@ testuje `HANGUPCAUSE` a při aktivní odpovědi telefonu okamžitě zavěsí
 (žádná notifikace, žádné do-vyzvánění). Diagnostika: každý příchozí hovor
 loguje `Dial konec: DIALSTATUS=… HANGUPCAUSE=…` v messages.log.
 
-## Jak zprovoznit VoLTE
+## Jedou hovory přes VoLTE?
 
-Hovory jedou přes IMS/LTE. Musely povolit tři zámky najednou — samostatně
-žádný nestačil: (1) MBN carrier profil **profil** místo defaultního
-profil (autoselect nemá pro operátor shodu; aktivace `qmicli
---pdc-activate-config` za horka, po resetu modemu ji vrací autoselect →
-drží ji systemd `gsm2sip-mbn.service`); (2) **QMI přístup** — passthrough
-`/dev/cdc-wdm0` do kontejneru + `libqmi-utils`; (3) **provisioning linky**: operátor
-aktivuje VoLTE na lince až po prvním připojení běžného VoLTE telefonu —
-testovací SIM bylo nutné jednou vložit do mobilu, zapnout „Volání přes 4G"
-a zavolat. Diagnóza stavu: `qmicli -d /dev/cdc-wdm0
---imsa-get-ims-registration-status` (registered) a `+CPSI?` během hovoru
-(musí zůstat LTE). Pozor: výměna SIM v modemu = přepojit USB + restart hostitele
-(modem nedetekuje SIM za běhu; bind mounty drží staré inody).
+Ano, pokud to zvládne modem, SIM i síť. Ověření: během hovoru se telefon
+nesmí přepnout z LTE na 2G/3G. VoLTE je potřeba mít **aktivované na lince
+u operátora** — u některých se zapíná až po prvním připojení běžného
+telefonu, takže novou SIM je občas nutné jednou vložit do mobilu. Krabičky
+prodávané jako hotové řešení mají tuhle část vyřešenou z výroby.
 
 ## Posílá WireGuard do tunelu všechen provoz telefonu?
 
