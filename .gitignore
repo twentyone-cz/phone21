@@ -2,3 +2,6 @@
 .env
 runtime/
 __pycache__/
+
+# Interní: nasazení, provozní zápisky, handoffy — na veřejný GitHub nepatří
+docs/
