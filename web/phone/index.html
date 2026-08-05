@@ -32,9 +32,14 @@
   .honest { border-left:3px solid var(--acc); padding:.2rem 1rem; color:var(--dim); background:var(--card); border-radius:0 8px 8px 0; }
   footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.8rem 1rem; }
   footer img { height:1.1rem; vertical-align:middle; opacity:.8; }
+  nav.top { display:flex; gap:1.4rem; justify-content:center; flex-wrap:wrap;
+    padding:.9rem 1rem; border-bottom:1px solid #21262d; background:#11161d; }
+  nav.top a { color:var(--dim); font-weight:600; font-size:.95rem; }
+  nav.top a:hover, nav.top a.act { color:var(--acc); text-decoration:none; }
 </style>
 </head>
 <body>
+<nav class="top"><a href="/" class="act">Domů</a><a href="/obchod/">Obchod</a><a href="/instalace">Návod</a><a href="/app">Můj účet</a></nav>
 <header>
   <p><img class="logo" src="jednadvacet.svg" alt="jednadvacet"></p>
   <div class="brand"><span class="phone">phone</span></div>

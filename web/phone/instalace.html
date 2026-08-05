@@ -24,9 +24,14 @@
   .honest { border-left:3px solid var(--acc); padding:.2rem 1rem; color:var(--dim); background:var(--card); border-radius:0 8px 8px 0; }
   .req { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
   footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.5rem 1rem; }
+  nav.top { display:flex; gap:1.4rem; justify-content:center; flex-wrap:wrap;
+    padding:.9rem 1rem; border-bottom:1px solid #21262d; background:#11161d; }
+  nav.top a { color:var(--dim); font-weight:600; font-size:.95rem; }
+  nav.top a:hover, nav.top a.act { color:var(--acc); text-decoration:none; }
 </style>
 </head>
 <body>
+<nav class="top"><a href="/">Domů</a><a href="/obchod/">Obchod</a><a href="/instalace" class="act">Návod</a><a href="/app">Můj účet</a></nav>
 <header>
   <a href="/"><img class="logo" src="jednadvacet.svg" alt="jednadvacet"></a>
   <h1>Instalace</h1>
