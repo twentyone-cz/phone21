@@ -22,7 +22,6 @@
 
 set -u
 DEV="${WWAN_DEV:-/dev/cdc-wdm0}"
-IF="${WWAN_IF:-wwan0}"
 APN="${WWAN_APN:-internet}"
 M_STANDBY="${WWAN_METRIC_STANDBY:-700}"
 M_ACTIVE="${WWAN_METRIC_ACTIVE:-50}"
@@ -34,11 +33,32 @@ STATE=/var/lib/gsm2sip/wwan.state
 log() { echo "[wwan] $(date -Is) $*"; }
 qmi() { timeout 25 qmicli -d "$DEV" "$@"; }
 
+# Jméno datového rozhraní není napevno: podle systému a jmenné politiky to
+# je wwan0, nebo předvídatelný název typu wwp1s0u1u1u4i5. Poznávací znamení
+# je adresář qmi/ v sysfs.
+detect_if() {
+  local d
+  for d in /sys/class/net/*/qmi; do
+    [[ -d "$d" ]] || continue
+    d="${d%/qmi}"
+    echo "${d##*/}"
+    return 0
+  done
+  return 1
+}
+IF="${WWAN_IF:-$(detect_if || true)}"
+IF="${IF:-wwan0}"
+
 wwan_start() {
   [[ -c "$DEV" ]] || { log "CHYBA: $DEV neexistuje"; return 1; }
   [[ -d "/sys/class/net/$IF" ]] || { log "CHYBA: rozhraní $IF neexistuje (qmi_wwan driver?)"; return 1; }
   ip link set "$IF" down 2>/dev/null
-  echo Y > "/sys/class/net/$IF/qmi/raw_ip" 2>/dev/null || true
+  # raw_ip musí být Y, jinak rozhraním neteče nic; v kontejneru je /sys jen
+  # pro čtení, takže když už Y není, musí to přepnout hostitel
+  if ! echo Y > "/sys/class/net/$IF/qmi/raw_ip" 2>/dev/null; then
+    [[ "$(cat "/sys/class/net/$IF/qmi/raw_ip" 2>/dev/null)" == "Y" ]] || \
+      log "POZOR: $IF nemá raw_ip=Y a nejde přepnout (/sys read-only) — data nepotečou"
+  fi
   out="$(qmi --wds-start-network="apn=$APN,ip-type=4" --client-no-release-cid 2>&1)" \
     || { log "CHYBA start-network: $out"; return 1; }
   handle="$(grep -oE "handle: '[0-9]+'" <<<"$out" | grep -oE '[0-9]+')"
@@ -95,12 +115,18 @@ case "${1:-}" in
     island_on() {
       asterisk -rx "database get gsm2sip island_mode" 2>/dev/null | grep -q "Value: on"
     }
-    if [[ ! -c "$DEV" || ! -d "/sys/class/net/$IF" ]]; then
-      log "modem není vidět jako datové zařízení ($DEV / $IF) — hlídka končí"
-      exit 0
-    fi
-    fails=0; active=0
+    fails=0; active=0; warned=0
     while true; do
+      # rozhraní se může objevit až po uvolnění QMI (ModemManager) — hlídka
+      # proto nekončí, jen čeká
+      [[ -d "/sys/class/net/$IF" ]] || IF="$(detect_if || echo "$IF")"
+      if [[ ! -c "$DEV" || ! -d "/sys/class/net/$IF" ]]; then
+        [[ $warned -eq 0 ]] && log "datové rozhraní modemu zatím není k dispozici ($DEV / $IF) — čekám"
+        warned=1
+        sleep "$CHECK_INT"
+        continue
+      fi
+      if [[ $warned -eq 1 ]]; then log "datové rozhraní $IF je k dispozici"; warned=0; fi
       if ! island_on; then
         if [[ $active -eq 1 ]]; then
           log "ostrovní režim vypnut v nastavení — vracím modem do standby"
