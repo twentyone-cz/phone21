@@ -2,34 +2,34 @@
 
 ## Android dovolí jen jednu VPN — jak vedle brány provozovat komerční VPN?
 
-Android (i GrapheneOS) povolí jednu aktivní VPN na profil. Řešení je sloučit
-obojí do jednoho WireGuard profilu se **dvěma peery**: WireGuard routuje
-podle nejdelšího prefixu, takže rozsah privátní sítě jde na bránu a
-`0.0.0.0/0, ::/0` na komerční VPN. Privátní klíč přitom nemusí opustit
-telefon — config od poskytovatele se naskenuje do aplikace a peer brány se
-doplní ručně (veřejný klíč brány, AllowedIPs rozsahu privátní sítě,
-PersistentKeepalive 25). Výpadek VPN pak shodí internet telefonu, ale hovory
-přes bránu jedou dál.
+Android (i GrapheneOS) povolí jednu aktivní VPN na profil a aplikaci
+privátní sítě to místo zabere. Obojí naráz proto nejde spustit vedle sebe.
 
-Alternativy: druhá VPN v jiném uživatelském profilu (limit je per-profil),
-nebo exit node uvnitř privátní sítě.
+Co s tím:
+
+- **Výstupní uzel uvnitř privátní sítě** — provoz telefonu jde ven přes
+  vybrané zařízení v síti a jednu aplikaci tím zastanou obě role.
+- **Druhý uživatelský profil** na telefonu — limit platí na profil, takže
+  v jednom může běžet komerční VPN a v druhém brána.
+
+Bez toho platí prosté pravidlo: když si zapneš komerční VPN, hovory přes
+bránu po dobu jejího běhu nechodí.
 
 ## Linphone při odchozím hovoru hlásí „Cannot place a call as there is already another call connecting…"
 
-Kosmetický artefakt aplikace (souhra s Telecom integrací, která je zapnutá
-kvůli handsfree v autě): hovor se zakládá jednou přes Telecom vrstvu a
-jednou v UI, druhá cesta ohlásí toast — na bránu vždy dorazí jediný hovor
-a proběhne normálně (ověřeno logem 2026-08-03). Neřešit, neexistuje k tomu
-známý upstream bug; Telecom integraci nevypínat (přišli bychom o hovory na
-displeji auta). Sledovat, zda nezmizí s aktualizací Linphone.
+Kosmetická hláška samotného Linphonu. Hovor se v něm zakládá dvěma cestami
+— jednou přes systémovou vrstvu pro telefonování (díky ní se hovory ukazují
+na displeji auta) a jednou v aplikaci; druhá cesta hlášku vypíše. Na bránu
+vždy dorazí jediný hovor a normálně se spojí, takže se dá ignorovat.
+Systémovou integraci kvůli tomu nevypínej — přišel bys o handsfree v autě.
 
 ## Volajícímu to po odmítnutí hovoru dál vyzvánělo — proč?
 
-Opraveno 2026-08-03: 603 Decline (kauza 21) a 486 Busy (kauza 17) Asterisk
-mapuje do stejných DIALSTATUS jako nedosažitelnost; dialplan proto nově
-testuje `HANGUPCAUSE` a při aktivní odpovědi telefonu okamžitě zavěsí
-(žádná notifikace, žádné do-vyzvánění). Diagnostika: každý příchozí hovor
-loguje `Dial konec: DIALSTATUS=… HANGUPCAUSE=…` v messages.log.
+Stará chyba, opravená v srpnu 2026. Odmítnutí hovoru vypadalo pro bránu
+stejně jako nedostupný telefon, takže volajícímu vyzvánělo dál. Dneska
+brána pozná rozdíl mezi „nezvedl to" a „aktivně odmítl" a při odmítnutí
+zavěsí okamžitě — volající uslyší obsazeno a žádná notifikace o zmeškaném
+hovoru nepřijde. Když se to chová jinak, máš starou verzi.
 
 ## Jedou hovory přes VoLTE?
 
@@ -52,13 +52,15 @@ cesta k telefonu vede přes ta samá data. Krabička to pozná, napíše to do
 logu a spojení po hovoru sama postaví znovu; SMS jdou po jiné cestě
 a fungují dál. Stav VoLTE vidíš v aplikaci u dlaždice mobilní sítě.
 
-## Posílá WireGuard do tunelu všechen provoz telefonu?
+## Posílá aplikace do tunelu všechen provoz telefonu?
 
-Ne — profil má `AllowedIPs = rozsah privátní sítě` (split tunnel): do tunelu jde jen
-SIP/RTP/SMS na bránu (a web UI brány). Ostatní provoz jde
-normálně mimo tunel. Brána navíc dropuje forward z `wg0` mimo tunel, takže
-telefon se přes ni nedostane do LAN ani do internetu. Pozor: řádek
-`DNS = 1.1.1.1` v profilu přesměruje DNS celého telefonu na Cloudflare
-(nešifrovaně, mimo tunel), pokud není aktivní Private DNS (DoT) — ten má
-přednost. Volbu „Blokovat spojení mimo VPN" nezapínat (zablokovala by
-všechen provoz mimo AllowedIPs).
+Ne. Do privátní sítě jde jen provoz na bránu — hovory, zprávy a její web
+UI. Všechno ostatní (web, e-mail, streamování) jde z telefonu normálně
+mimo tunel a brána o tom nic neví.
+
+Obráceně to platí taky: brána nepustí provoz z tunelu dál do domácí sítě
+ani do internetu. Telefon se přes ni tedy nedostane nikam jinam než k ní
+samotné — není to router ani výstupní uzel.
+
+Výjimkou je, když si výstupní uzel zapneš sám (viz otázka o komerční VPN
+výš) — pak přes něj jde všechno, protože přesně o to jde.
