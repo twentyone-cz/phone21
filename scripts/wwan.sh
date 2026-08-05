@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GSM2SIP — „ostrovní režim": internet přes USB modem (QMI data, wwan0)
+# GSM2SIP — „ostrovní režim": internet přes USB modem (QMI data)
 #
 #   wwan.sh start    # sestavit datové spojení a nastavit záložní default route
 #   wwan.sh stop     # spojení položit a uklidit
@@ -7,16 +7,19 @@
 #   wwan.sh watch    # failover smyčka: primární konektivitu hlídá pingem,
 #                    # při výpadku přepne default route na modem, po zotavení zpět
 #
-# Env: WWAN_APN (default internet), WWAN_DEV (/dev/cdc-wdm0), WWAN_IF (wwan0),
+# Env: WWAN_APN (default internet), WWAN_DEV (/dev/cdc-wdm0),
+#      WWAN_IF (jinak se rozhraní detekuje podle sysfs),
 #      WWAN_METRIC_STANDBY=700, WWAN_METRIC_ACTIVE=50,
 #      WWAN_CHECK_HOST=1.1.1.1, WWAN_CHECK_INTERVAL=15, WWAN_FAIL_N=4
 #
 # Poznámky:
 # - Data (rmnet) jedou nezávisle na hlasové části brány (AT/PCM porty);
-#   s VoLTE tečou data i během hovoru.
+#   s VoLTE tečou data i během hovoru. BEZ VoLTE jde hovor CSFB do 2G a
+#   datové spojení na tu dobu padá — hlídka to hlásí do logu a po hovoru
+#   spojení postaví znovu.
 # - Kontejner potřebuje: network_mode: host, cap_add NET_ADMIN,
 #   devices /dev/cdc-wdm0 (viz compose).
-# - V LXC nasazení POZOR: rozhraní wwan0 žije v netns hostitele — bez
+# - V LXC nasazení POZOR: datové rozhraní žije v netns hostitele — bez
 #   passthrough (lxc.net.X.type=phys) tam ostrovní režim nejde; feature
 #   cílí na nativní/Umbrel nasazení.
 
@@ -92,6 +95,9 @@ wwan_stop() {
 
 wwan_up() { [[ -f "$STATE" ]] && ip route show default dev "$IF" 2>/dev/null | grep -q .; }
 
+# Route po pádu spojení nezmizí sama, takže „jede to" se musí ptát modemu.
+bearer_ok() { qmi --wds-get-packet-service-status 2>/dev/null | grep -q "'connected'"; }
+
 primary_if() {
   ip route show default | awk -v w="$IF" '$5 != w {print $5; exit}'
 }
@@ -115,7 +121,12 @@ case "${1:-}" in
     island_on() {
       asterisk -rx "database get gsm2sip island_mode" 2>/dev/null | grep -q "Value: on"
     }
-    fails=0; active=0; warned=0
+    # Bez VoLTE jde hovor CSFB do 2G a datové spojení na tu dobu padá —
+    # v ostrovním režimu tím zmizí i cesta k telefonu. Stav plní mbn smyčka.
+    # Neznámý stav (jinde než v Umbrel appce ho nikdo neplní) se nehlásí —
+    # varuje se jen na prokazatelně chybějící VoLTE.
+    volte_ok() { [[ "$(cat /var/lib/gsm2sip/volte 2>/dev/null)" != "not-registered" ]]; }
+    fails=0; active=0; warned=0; volte_warned=0
     while true; do
       # rozhraní se může objevit až po uvolnění QMI (ModemManager) — hlídka
       # proto nekončí, jen čeká
@@ -137,11 +148,28 @@ case "${1:-}" in
         sleep "$CHECK_INT"
         continue
       fi
+      if volte_ok; then
+        volte_warned=0
+      elif [[ $volte_warned -eq 0 ]]; then
+        log "POZOR: modem není registrovaný na VoLTE — hovor přepne do 2G a"
+        log "       ostrovní spojení na tu dobu vypadne (data se obnoví po hovoru)"
+        volte_warned=1
+      fi
       if primary_ok; then
         fails=0
         if [[ $active -eq 1 ]]; then
           log "primární konektivita zpět — vracím modem do standby"
           ip route replace default dev "$IF" metric "$M_STANDBY" 2>/dev/null
+          active=0
+        fi
+      elif [[ $active -eq 1 ]] && ! bearer_ok; then
+        # spojení spadlo za běhu ostrovního režimu (typicky CSFB hovor) —
+        # postavit ho znovu, jinak zůstane brána bez cesty ven
+        log "ostrovní spojení spadlo — obnovuji"
+        wwan_stop >/dev/null 2>&1
+        if wwan_start; then
+          ip route replace default dev "$IF" metric "$M_ACTIVE" 2>/dev/null
+        else
           active=0
         fi
       else

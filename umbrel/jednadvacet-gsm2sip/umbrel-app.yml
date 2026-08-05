@@ -2,7 +2,7 @@ manifestVersion: 1
 id: jednadvacet-gsm2sip
 category: networking
 name: jednadvacet phone
-version: "0.9.13"
+version: "0.9.14"
 tagline: Vlastní GSM brána — hovory a SMS z tvé SIM kamkoli přes SIP
 description: >-
   GSM2SIP promění USB LTE modem se SIM kartou v soukromou telefonní bránu:
@@ -34,9 +34,8 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Nový vzhled ovládání: přehledný dashboard se stavem sítě, telefonu
-  a poslední zprávy. Ostrovní režim (náhradní internet z mobilních dat,
-  když vypadne linka) se nově zapíná přímo v aplikaci — a našel si datové
-  rozhraní modemu i tam, kde se nejmenuje wwan0. Záložka Telefon se
-  odemkne, až je krabička v privátní síti. Nastavení zmeškaných hovorů
-  je na jednom místě.
+  Ostrovní režim (náhradní internet z mobilních dat) hlídá VoLTE: bez něj
+  hovor přepne modem do 2G a data na tu dobu vypadnou — aplikace to napíše
+  a spojení po hovoru sama postaví znovu. Stav VoLTE je vidět u mobilní
+  sítě. Připojení telefonu ukazuje jediný QR kód (přečte ho skener
+  v Linphone i běžný fotoaparát), odkaz k opsání zůstal jako záloha.

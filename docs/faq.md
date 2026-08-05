@@ -39,6 +39,19 @@ u operátora** — u některých se zapíná až po prvním připojení běžné
 telefonu, takže novou SIM je občas nutné jednou vložit do mobilu. Krabičky
 prodávané jako hotové řešení mají tuhle část vyřešenou z výroby.
 
+## Ostrovní režim: co se stane, když během něj přijde hovor?
+
+Ostrovní režim je záloha internetu — když vypadne domácí linka, krabička
+si vezme připojení z mobilních dat SIM. Pro hovory má smysl **jen
+s VoLTE**: hlas i data pak jedou po LTE současně, takže hovor projde
+i v ostrovním režimu.
+
+Bez VoLTE se hovor přepne do 2G (CSFB) a mobilní data po tu dobu nejedou.
+Prakticky to znamená, že v ostrovním režimu bez VoLTE hovor nedorazí —
+cesta k telefonu vede přes ta samá data. Krabička to pozná, napíše to do
+logu a spojení po hovoru sama postaví znovu; SMS jdou po jiné cestě
+a fungují dál. Stav VoLTE vidíš v aplikaci u dlaždice mobilní sítě.
+
 ## Posílá WireGuard do tunelu všechen provoz telefonu?
 
 Ne — profil má `AllowedIPs = rozsah privátní sítě` (split tunnel): do tunelu jde jen

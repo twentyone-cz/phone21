@@ -149,15 +149,35 @@ qmi_recover() {
   return 1
 }
 
+# Stav IMS (VoLTE) pro ostatní části appky: bez něj hovor shodí datové
+# spojení (CSFB přepne modem do 2G), což je pro ostrovní režim zásadní.
+volte_probe() {
+  local out
+  out="$(timeout 15 qmicli -d /dev/cdc-wdm0 --imsa-get-ims-registration-status 2>/dev/null)" || return 1
+  case "$out" in
+    *"Status: 'registered'"*) echo registered ;;
+    *) echo not-registered ;;
+  esac
+}
+
 mbn_loop() {
   sleep 30              # Asterisk musí být nahoře (reset jde přes CLI)
   mm_release
   qmi_recover || true
+  local n=0
   while true; do
     if [[ -c /dev/cdc-wdm0 ]]; then
-      MBN_PROFILE="${MBN_PROFILE:-auto}" /opt/gsm2sip/scripts/mbn-profile.sh auto || true
+      # profil se řeší jednou za 10 minut, IMS stav každou minutu (levné)
+      if [[ $((n % 10)) -eq 0 ]]; then
+        MBN_PROFILE="${MBN_PROFILE:-auto}" /opt/gsm2sip/scripts/mbn-profile.sh auto || true
+      fi
+      v="$(volte_probe || echo unknown)"
+      printf '%s\n' "$v" > "$DATA/volte.tmp" 2>/dev/null \
+        && mv "$DATA/volte.tmp" "$DATA/volte" 2>/dev/null
+      chmod 0644 "$DATA/volte" 2>/dev/null || true
     fi
-    sleep 600
+    n=$((n + 1))
+    sleep 60
   done
 }
 

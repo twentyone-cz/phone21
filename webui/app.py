@@ -257,6 +257,16 @@ def get_island_mode():
     return "off"
 
 
+def volte_state():
+    """registered / not-registered / unknown — plní ho asterisk kontejner
+    (qmicli --imsa-get-ims-registration-status) každou minutu."""
+    try:
+        val = open(os.path.join(DATA_DIR, "volte")).read().strip()
+    except OSError:
+        return "unknown"
+    return val if val in ("registered", "not-registered") else "unknown"
+
+
 def read_journal(limit=200):
     path = os.path.join(DATA_DIR, "journal.jsonl")
     rows = []
@@ -481,9 +491,11 @@ def page_home(info=""):
     if m and m.get("State") == "Free":
         tiles.append(_tile(
             "\U0001F4F6", "Mobilní síť", "Připojeno", "ok",
-            "%s · %s · signál %s" % (esc(m.get("Provider Name", "?")),
-                                     esc(m.get("Access technology", "?")),
-                                     esc(m.get("RSSI", "?")))))
+            "%s · %s%s · signál %s" % (esc(m.get("Provider Name", "?")),
+                                       esc(m.get("Access technology", "?")),
+                                       " + VoLTE" if volte_state() == "registered"
+                                       else "",
+                                       esc(m.get("RSSI", "?")))))
     elif m and m.get("State"):
         tiles.append(_tile(
             "\U0001F4F6", "Mobilní síť", esc(m.get("State")), "warn",
@@ -537,6 +549,18 @@ def page_home(info=""):
                     "se může účtovat.")))
 
     island = get_island_mode()
+    volte = volte_state()
+    if volte == "registered":
+        islandnote = ('<p class="muted"><span class="dot ok"></span>Modem má '
+                      "VoLTE, takže data jedou i během hovoru.</p>")
+    elif volte == "not-registered":
+        islandnote = ('<p class="muted"><span class="dot warn"></span>Modem '
+                      "teď nemá VoLTE. Náhradní připojení proto během hovoru "
+                      "vypadne a naskočí až po jeho skončení — jako záloha "
+                      "pro krátké výpadky to stačí, na hovory v ostrovním "
+                      "režimu spoléhat nejde.</p>")
+    else:
+        islandnote = ""
     islandform = (
         '<form method="post" action="%s">'
         "%s%s"
@@ -558,8 +582,8 @@ def page_home(info=""):
         "chatu. Tohle určuje, co uslyší volající:</p>%s</div>"
         '<div class="card"><h2 style="margin-top:0">Ostrovní režim</h2>'
         "<p class=\"muted\">Záloha internetu z mobilních dat, když vypadne "
-        "linka:</p>%s</div></div>"
-    ) % (info, "".join(tiles), missed, islandform))
+        "linka:</p>%s%s</div></div>"
+    ) % (info, "".join(tiles), missed, islandform, islandnote))
 
 
 def page_status(mode_info=""):
@@ -610,8 +634,13 @@ def page_status(mode_info=""):
              _choice("island", "off", island, "Vypnuto",
                      "jen primární linka, mobilní data se nepoužijí"),
              _choice("island", "on", island, "Zapnuto",
-                     "při výpadku linky default route přes wwan0 (data se "
-                     "účtují)"))
+                     "při výpadku linky default route přes datové rozhraní "
+                     "modemu (data se účtují)"))
+        body += ('<p class="muted">IMS/VoLTE: <b>%s</b>%s</p>' % (
+            esc(volte_state()),
+            "" if volte_state() == "registered" else
+            " — bez VoLTE jde hovor CSFB do 2G a datové spojení na tu dobu "
+            "padá; hlídka ho po hovoru postaví znovu."))
     body += '<p><button class="ghost" onclick="location.reload()">Obnovit</button></p>'
     return render("status", body)
 
@@ -717,41 +746,29 @@ def page_phone(info=""):
 
 
 def page_qr(url):
-    """QR s odkazem na konfiguraci — Linphone: Asistent → Načíst vzdálenou
-    konfiguraci → naskenovat."""
+    """QR s odkazem na konfiguraci. Kód nese schéma linphone-config:, které
+    otevře appku rovnou — přečte ho i vestavěný skener Linphonu i systémový
+    fotoaparát (ověřeno na GrapheneOS i Samsungu)."""
     body = """<h1>Připojení telefonu</h1>
-<p>Nejdřív si v telefonu nainstaluj <b>Linphone</b>. Pak zvol jednu ze tří
-cest — první je nejspolehlivější:</p>
-
-<h2>A) Naskenovat běžným fotoaparátem <span class="badge">doporučeno</span></h2>
-<p>Otevři v telefonu <b>fotoaparát</b> (ne Linphone) a namiř ho sem.
-Vyskočí odkaz — ťukni na něj a Linphone se nastaví sám.</p>
+<p>Nejdřív si v telefonu nainstaluj <b>Linphone</b>. Pak naskenuj kód —
+buď skenerem v Linphone (Přidat účet → <b>Scan QR code</b>), nebo běžným
+fotoaparátem telefonu; obojí appku nastaví samo.</p>
 <div id="qr" class="qr"></div>
 
-<h2>B) Opsat odkaz do Linphone</h2>
+<details><summary>Když skener nespolupracuje</summary>
 <p>V Linphone: <b>Nastavení → Pokročilá nastavení → Remote provisioning
-URL</b> → vlož tohle a dej <b>Download &amp; apply</b>:</p>
-<p class="mono" style="font-size:1.25rem;letter-spacing:.02em">%s</p>
+URL</b> → vlož tenhle odkaz a dej <b>Download &amp; apply</b>:</p>
+<p class="mono" style="font-size:1.15rem;letter-spacing:.02em">%s</p></details>
 
-<h2>C) Skener uvnitř Linphone</h2>
-<p>Jen když ti fungoval dřív (v některých verzích je nespolehlivý):
-Přidat účet → <b>Scan QR code</b> a namiř na kód níž.</p>
-<div id="qr2" class="qr" style="max-width:220px"></div>
-
-<p class="small muted">Odkaz platí <b>10 minut</b> a jen na jedno použití;
+<p class="muted">Odkaz platí <b>10 minut</b> a jen na jedno použití;
 obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší nebo se
 nepovede, vrať se a vygeneruj si nový.</p>
 <p><a href="%s">Zpět</a></p>""" % (esc(url), u("/telefon"))
-    # A) schéma linphone-config: otevře appku přímo z fotoaparátu systému
-    #    (obchází vestavěný skener, který bývá nespolehlivý)
-    # C) holé URL pro skener uvnitř Linphone; nižší korekce = řidší kód
     extra = """<script src="%s"></script><script>
 new QRCode(document.getElementById("qr"), {text: %s, width: 280, height: 280,
   correctLevel: QRCode.CorrectLevel.L});
-new QRCode(document.getElementById("qr2"), {text: %s, width: 220, height: 220,
-  correctLevel: QRCode.CorrectLevel.L});
 </script>""" % (u("/static/qrcode.min.js"),
-                json.dumps("linphone-config:" + url), json.dumps(url))
+                json.dumps("linphone-config:" + url))
     return render("phone", body, extra)
 
 
