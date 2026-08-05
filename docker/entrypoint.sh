@@ -166,8 +166,18 @@ if [[ "${GSM2SIP_SELFCONFIG:-0}" == "1" ]]; then
 fi
 [[ "${WATCHDOG_INTERNAL:-0}" == "1" ]] && watchdog_loop &
 [[ "${MBN_INTERNAL:-0}" == "1" ]] && mbn_loop &
-# Ostrovní režim: internet failover přes modem (vyžaduje NET_ADMIN + host síť)
-[[ "${WWAN_FAILOVER:-0}" == "1" ]] && /opt/gsm2sip/scripts/wwan.sh watch &
+# Ostrovní režim: hlídka běží vždy, ale zasáhne jen když je zapnutý
+# přepínač ve web UI (AstDB gsm2sip/island_mode); WWAN_FAILOVER je jen
+# výchozí hodnota při první instalaci.
+island_default() {
+  sleep 40
+  local want=off
+  [[ "${WWAN_FAILOVER:-0}" == "1" ]] && want=on
+  asterisk -rx "database get gsm2sip island_mode" 2>/dev/null | grep -q "Value:" || \
+    asterisk -rx "database put gsm2sip island_mode $want" >/dev/null 2>&1
+}
+island_default &
+/opt/gsm2sip/scripts/wwan.sh watch &
 
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
   while true; do

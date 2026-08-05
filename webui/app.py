@@ -247,6 +247,16 @@ def get_missed_mode():
     return "ring"
 
 
+def get_island_mode():
+    """Ostrovní režim: při výpadku primární linky vezme krabička internet
+    z mobilních dat modemu. Default vypnuto (data se účtují)."""
+    out = cli("database get gsm2sip island_mode")
+    for ln in out.splitlines():
+        if ln.startswith("Value:"):
+            return "on" if ln.split(":", 1)[1].strip() == "on" else "off"
+    return "off"
+
+
 def read_journal(limit=200):
     path = os.path.join(DATA_DIR, "journal.jsonl")
     rows = []
@@ -315,65 +325,118 @@ def tail_log(n=120):
         return "(log %s není k dispozici)" % LOG_FILE
 
 
-# Barvy: expert = zelený terminálový vzhled, gui = jednadvacet oranžová.
-ACCENT = "#F7931A" if GUI else "#9c9"
-NAVBG = "#1a1409" if GUI else "#1b2a1b"
-BTN = "#F7931A" if GUI else "#2a4"
-BTNFG = "#111" if GUI else "#fff"
+# Vzhled: gui = produktový (jednadvacet), expert = utilitární
+ACCENT = "#F7931A" if GUI else "#7fb069"
 
 PAGE = """<!doctype html><html lang="cs"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{brand_plain}</title><style>
-body{{font-family:system-ui,sans-serif;margin:0;background:#111;color:#ddd}}
-nav{{background:%(navbg)s;padding:.6rem 1rem}}
-nav .brand{{color:%(acc)s;font-weight:400;margin-right:1.4rem}}
-nav .brand b{{font-weight:800}}
-nav a{{color:%(acc)s;margin-right:1rem;text-decoration:none;font-weight:600}}
-nav a.act{{color:#fff;border-bottom:2px solid %(acc)s}}
-main{{padding:1rem;max-width:1100px;margin:auto}}
-pre{{background:#000;padding:.8rem;border-radius:6px;overflow-x:auto;font-size:.85rem;line-height:1.35}}
-table{{border-collapse:collapse;width:100%%;font-size:.9rem}}
-td,th{{border-bottom:1px solid #333;padding:.35rem .5rem;text-align:left;vertical-align:top}}
-th{{color:%(acc)s}}tr:hover{{background:#1a1a1a}}
-.ok{{color:#7d7}}.bad{{color:#e77}}.warn{{color:#dc8}}
-form.inline{{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}}
-input,textarea,button{{background:#222;color:#ddd;border:1px solid #444;border-radius:4px;padding:.45rem}}
-button{{background:%(btn)s;border:0;color:%(btnfg)s;cursor:pointer;font-weight:700}}
-small{{color:#888}}
-h2{{color:%(acc)s;font-size:1rem;margin:1.2rem 0 .4rem}}
-.tiles{{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin:1rem 0}}
-.tile{{background:#191919;border:1px solid #2a2a2a;border-radius:10px;padding:1rem 1.1rem}}
-.tile h3{{margin:.1rem 0 .4rem;font-size:1.02rem;color:#eee}}
-.tile .big{{font-size:1.25rem;font-weight:700}}
-details{{margin:.8rem 0}}summary{{cursor:pointer;color:%(acc)s}}
+:root { --acc: ACCENT_COLOR; --bg:#0e1116; --surface:#161b22; --surface2:#1c2230;
+  --fg:#e7edf3; --muted:#96a1ae; --line:#242c38; --ok:#3fb950; --warn:#d29922;
+  --bad:#f85149; --r:14px; }
+@media (prefers-color-scheme: light) {
+  :root { --bg:#f7f8fa; --surface:#fff; --surface2:#f0f2f5; --fg:#12161c;
+          --muted:#5b6672; --line:#e3e7ec; }
+}
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--fg); line-height:1.6;
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif }
+a { color:var(--acc); text-decoration:none } a:hover { text-decoration:underline }
+nav { display:flex; align-items:center; gap:.25rem; flex-wrap:wrap;
+  padding:.7rem 1rem; background:var(--surface); border-bottom:1px solid var(--line);
+  position:sticky; top:0; z-index:10 }
+nav .brand { color:var(--fg); margin-right:1rem; font-size:1.05rem }
+nav .brand b { font-weight:800; color:var(--acc) }
+nav a { color:var(--muted); font-weight:600; font-size:.94rem; padding:.4rem .75rem;
+  border-radius:99px }
+nav a:hover { background:var(--surface2); color:var(--fg); text-decoration:none }
+nav a.act { background:var(--acc); color:#0e1116 }
+nav a.off { opacity:.4; pointer-events:none }
+main { padding:1.25rem 1rem 3rem; max-width:60rem; margin:auto }
+h1 { font-size:1.5rem; letter-spacing:-.02em; margin:.2rem 0 1rem }
+h2 { font-size:1.05rem; margin:1.8rem 0 .6rem }
+.tiles { display:grid; gap:.9rem; margin:1rem 0;
+  grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)) }
+.tile,.card { background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r); padding:1rem 1.1rem }
+.tile h3 { margin:0 0 .5rem; font-size:.78rem; font-weight:700; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.06em }
+.tile .big { font-size:1.3rem; font-weight:700; letter-spacing:-.02em }
+.tile small,.muted { color:var(--muted); font-size:.87rem }
+.ok { color:var(--ok) } .bad { color:var(--bad) } .warn { color:var(--warn) }
+.dot { display:inline-block; width:.5rem; height:.5rem; border-radius:50%;
+  margin-right:.45rem; vertical-align:.1em; background:var(--muted) }
+.dot.ok { background:var(--ok) } .dot.warn { background:var(--warn) }
+.dot.bad { background:var(--bad) }
+pre { background:var(--surface2); border:1px solid var(--line); border-radius:var(--r);
+  padding:.85rem 1rem; overflow-x:auto; font-size:.82rem; line-height:1.45 }
+table { border-collapse:collapse; width:100%; font-size:.92rem; margin:.6rem 0 }
+td,th { text-align:left; padding:.55rem .6rem; border-bottom:1px solid var(--line);
+  vertical-align:top }
+th { color:var(--muted); font-size:.75rem; text-transform:uppercase;
+  letter-spacing:.05em }
+form.inline { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin:.8rem 0 }
+input,select,textarea { background:var(--bg); color:var(--fg); border:1px solid var(--line);
+  border-radius:10px; padding:.6rem .75rem; font:inherit; font-size:.95rem }
+input:focus,select:focus { outline:2px solid var(--acc); outline-offset:1px }
+button,.btn { background:var(--acc); color:#0e1116; border:0; border-radius:10px;
+  padding:.6rem 1.1rem; font:inherit; font-weight:700; cursor:pointer;
+  display:inline-block }
+button:hover,.btn:hover { filter:brightness(1.08); text-decoration:none }
+button.ghost { background:var(--surface2); color:var(--fg); border:1px solid var(--line) }
+.choice { display:flex; gap:.7rem; align-items:flex-start; padding:.75rem .9rem;
+  border:1px solid var(--line); border-radius:12px; margin:.45rem 0; cursor:pointer }
+.choice:hover { border-color:var(--acc) }
+.choice input { accent-color:var(--acc); margin:.3rem 0 0; width:auto }
+.choice span { color:var(--muted); font-size:.87rem }
+.choice span b { display:block; color:var(--fg); font-size:.95rem; margin-bottom:.1rem }
+.qr { background:#fff; padding:14px; border-radius:var(--r); display:inline-block;
+  line-height:0 }
+.qr img,.qr canvas { display:block; max-width:100%; height:auto }
+.badge { display:inline-block; background:var(--surface2); color:var(--muted);
+  border:1px solid var(--line); border-radius:99px; padding:.1rem .6rem;
+  font-size:.72rem; font-weight:700; text-transform:uppercase }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
+details { margin:1rem 0 } summary { cursor:pointer; color:var(--muted); font-weight:600 }
+footer { text-align:center; color:var(--muted); font-size:.8rem; padding:1.5rem 1rem }
 </style></head><body>
 <nav><span class="brand">{brand}</span>{nav}</nav>
 <main>{body}</main>
-<footer style="padding:1rem;text-align:center"><small>jen LAN/privátní síť · {now}</small></footer>
-</body></html>""" % {"acc": ACCENT, "navbg": NAVBG, "btn": BTN, "btnfg": BTNFG}
-PAGE = PAGE.replace("{brand_plain}", "jednadvacet phone" if GUI else "GSM2SIP")
+<footer>jen LAN / privátní síť · {now}</footer>
+{extra}</body></html>"""
+PAGE = PAGE.replace("ACCENT_COLOR", ACCENT)
 
 
-def render(active, body):
+def render(active, body, extra=""):
+    """Telefon je dostupný, až když krabička visí v privátní síti — dřív by
+    nastavení stejně nefungovalo."""
+    ready = bool(ts_ip()) if TS_DIR else True
     if GUI:
-        tabs = [("/", "home", "Domů"), ("/sms", "sms", "Zprávy"),
-                ("/telefon", "phone", "Telefon")]
+        tabs = [(u("/"), "home", "Domů", True), (u("/sms"), "sms", "Zprávy", True),
+                (u("/telefon"), "phone", "Telefon", ready)]
         if TS_DIR:
-            tabs.append(("/net", "net", "Síť"))
-        tabs.append(("/stav", "status", "Pokročilé"))
-        nav = "".join('<a href="%s" class="%s">%s</a>' %
-                      (h, "act" if active == k else "", t) for h, k, t in tabs)
-        return PAGE.format(nav=nav, brand="jednadvacet <b>phone</b>",
-                           body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
-    tabs = [("/", "status", "Stav"), ("/sms", "sms", "SMS"),
-            ("/telefon", "phone", "Telefon")]
-    if TS_DIR:
-        tabs.append(("/net", "net", "Síť"))
-    tabs.append(("/diag", "diag", "Diagnostika"))
-    nav = "".join('<a href="%s" class="%s">%s</a>' %
-                  (h, "act" if active == k else "", t) for h, k, t in tabs)
-    return PAGE.format(nav=nav, brand="GSM2SIP",
-                       body=body, now=time.strftime("%Y-%m-%d %H:%M:%S"))
+            tabs.append((u("/net"), "net", "Síť", True))
+        tabs.append((u("/stav"), "status", "Pokročilé", True))
+        brand = "jednadvacet <b>phone</b>"
+    else:
+        tabs = [(u("/"), "status", "Stav", True), (u("/sms"), "sms", "SMS", True),
+                (u("/telefon"), "phone", "Telefon", ready)]
+        if TS_DIR:
+            tabs.append((u("/net"), "net", "Síť", True))
+        tabs.append((u("/diag"), "diag", "Diagnostika", True))
+        brand = "<b>GSM2SIP</b>"
+    nav = ""
+    for href, key, label, enabled in tabs:
+        cls = "act" if active == key else ("" if enabled else "off")
+        tip = "" if enabled else ' title="nejdřív připoj krabičku do privátní sítě"'
+        nav += '<a href="%s" class="%s"%s>%s</a>' % (href, cls, tip, label)
+    out = PAGE
+    for key, val in (("{nav}", nav), ("{brand}", brand), ("{body}", body),
+                     ("{extra}", extra), ("{brand_plain}",
+                      "jednadvacet phone" if GUI else "GSM2SIP"),
+                     ("{now}", time.strftime("%d.%m. %H:%M"))):
+        out = out.replace(key, val)
+    return out
 
 
 def esc(s):
@@ -400,103 +463,157 @@ def modem_summary():
     return d
 
 
+def _tile(icon, title, value, cls, note):
+    return ('<div class="tile"><h3>%s %s</h3><div class="big %s">%s</div>'
+            "<small>%s</small></div>") % (icon, title, cls, value, note)
+
+
+def _choice(name, value, cur, title, note):
+    return ('<label class="choice"><input type="radio" name="%s" value="%s"%s>'
+            "<span><b>%s</b>%s</span></label>") % (
+        name, value, " checked" if cur == value else "", title, note)
+
+
 def page_home(info=""):
     """GUI režim (Umbrel): spotřebitelský dashboard místo technických výpisů."""
     tiles = []
     m = modem_summary()
     if m and m.get("State") == "Free":
-        tiles.append(
-            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big ok">Připojeno</div>'
-            "<small>%s · %s · signál %s</small></div>"
-            % (esc(m.get("Provider Name", "?")),
-               esc(m.get("Access technology", "?")), esc(m.get("RSSI", "?"))))
+        tiles.append(_tile(
+            "\U0001F4F6", "Mobilní síť", "Připojeno", "ok",
+            "%s · %s · signál %s" % (esc(m.get("Provider Name", "?")),
+                                     esc(m.get("Access technology", "?")),
+                                     esc(m.get("RSSI", "?")))))
     elif m and m.get("State"):
-        tiles.append(
-            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big warn">%s</div>'
-            "<small>modem se připojuje — chvíli to trvá; zkontroluj SIM a anténu</small></div>"
-            % esc(m.get("State")))
+        tiles.append(_tile(
+            "\U0001F4F6", "Mobilní síť", esc(m.get("State")), "warn",
+            "modem se připojuje — chvíli to trvá; zkontroluj SIM a anténu"))
     else:
-        tiles.append(
-            '<div class="tile"><h3>📶 Mobilní síť</h3><div class="big bad">Neznámý stav</div>'
-            "<small>nelze se zeptat ústředny (AMI) — modem může běžet; "
-            'detail v <a href="%s">Pokročilé</a></small></div>' % u("/stav"))
+        tiles.append(_tile(
+            "\U0001F4F6", "Mobilní síť", "Neznámý stav", "bad",
+            'nelze se zeptat ústředny — detail v <a href="%s">Pokročilé</a>'
+            % u("/stav")))
     ip = ts_ip()
     if ip:
-        tiles.append(
-            '<div class="tile"><h3>🔒 Privátní síť</h3><div class="big ok">Připojeno</div>'
-            "<small>adresa krabičky: <b>%s</b> · <a href=\"%s\">detail</a></small></div>" % (esc(ip), u("/net")))
+        tiles.append(_tile(
+            "\U0001F512", "Privátní síť", "Připojeno", "ok",
+            'adresa krabičky <span class="mono">%s</span> · '
+            '<a href="%s">detail</a>' % (esc(ip), u("/net"))))
     else:
-        tiles.append(
-            '<div class="tile"><h3>🔒 Privátní síť</h3><div class="big warn">Nepřipojeno</div>'
-            '<small><a href="%s">vlož klíč privátní sítě</a> — telefon se pak dovolá odkudkoli</small></div>' % u("/net"))
+        tiles.append(_tile(
+            "\U0001F512", "Privátní síť", "Nepřipojeno", "warn",
+            '<a href="%s">vlož klíč privátní sítě</a> — telefon se pak dovolá '
+            "odkudkoli" % u("/net")))
     sec = read_secrets()
     if ip and sec.get("SIP_USER"):
-        tiles.append(
-            '<div class="tile"><h3>📱 Telefon</h3><div class="big ok">Připraveno</div>'
-            '<small>připoj ho na záložce <a href="%s">Telefon</a> · návod: '
+        tiles.append(_tile(
+            "\U0001F4F1", "Telefon", "Připraveno", "ok",
+            '<a href="%s">načti QR do Linphonu</a> · '
             '<a href="https://phone.twentyone.cz/instalace" target="_blank">'
-            "instalace</a></small></div>" % u("/telefon"))
+            "návod</a>" % u("/telefon")))
     else:
-        tiles.append(
-            '<div class="tile"><h3>📱 Telefon</h3><div class="big warn">Čeká</div>'
-            "<small>nejdřív připoj krabičku do privátní sítě</small></div>")
+        tiles.append(_tile(
+            "\U0001F4F1", "Telefon", "Čeká", "warn",
+            "nejdřív připoj krabičku do privátní sítě"))
     rows = read_journal(limit=5)
     last = rows[0] if rows else None
-    tiles.append(
-        '<div class="tile"><h3>💬 Zprávy</h3><div class="big">%s</div>'
-        '<small>%s · <a href="%s">všechny zprávy</a></small></div>'
-        % ((esc(last["from"]) if last else "—"),
-           (esc(last["msg"][:60]) if last else "zatím žádné"),
-           u("/sms")))
+    tiles.append(_tile(
+        "\U0001F4AC", "Poslední zpráva",
+        esc(last["from"]) if last else "—", "",
+        "%s · <a href=\"%s\">všechny zprávy</a>"
+        % (esc(last["msg"][:60]) if last else "zatím žádné", u("/sms"))))
+
     mode = get_missed_mode()
-    modeform = (
-        '<form class="inline" method="post" action="/missed-mode">'
-        '<label><input type="radio" name="mode" value="ring"%s> vyzvánět naprázdno</label>'
-        '<label><input type="radio" name="mode" value="announce"%s> hláska nedostupnosti</label>'
-        "<button>Uložit</button></form>"
-        % (" checked" if mode == "ring" else "", " checked" if mode == "announce" else ""))
+    missed = (
+        '<form method="post" action="%s">'
+        "%s%s"
+        '<button style="margin-top:.5rem">Uložit</button></form>' % (
+            u("/missed-mode"),
+            _choice("mode", "ring", mode, "Vyzvánět naprázdno",
+                    "Telefon zvoní ~30 s a nikdo to nezvedne. Volajícímu se "
+                    "nic neúčtuje."),
+            _choice("mode", "announce", mode, "Přehrát hlášku nedostupnosti",
+                    "Hovor se přijme a řekne, že jsi nedostupný — volajícímu "
+                    "se může účtovat.")))
+
+    island = get_island_mode()
+    islandform = (
+        '<form method="post" action="%s">'
+        "%s%s"
+        '<button style="margin-top:.5rem">Uložit</button></form>' % (
+            u("/island-mode"),
+            _choice("island", "off", island, "Vypnuto (doporučeno)",
+                    "Krabička jede jen po domácí lince. Mobilní data se "
+                    "nepoužijí."),
+            _choice("island", "on", island, "Zapnuto",
+                    "Když domácí připojení vypadne, krabička si vezme "
+                    "internet z mobilních dat SIM. Data se účtují podle "
+                    "tarifu.")))
+
     return render("home", (
-        '%s<div class="tiles">%s</div>'
-        "<h2>Když nejsi k zastižení</h2>"
-        "<p><small>Zmeškaný hovor ti vždy přijde jako zpráva. Co má slyšet volající:</small></p>%s"
-    ) % (info, "".join(tiles), modeform))
+        '%s<h1>Přehled</h1><div class="tiles">%s</div>'
+        '<div class="tiles" style="margin-top:1.6rem">'
+        '<div class="card"><h2 style="margin-top:0">Když nejsi k zastižení</h2>'
+        "<p class=\"muted\">Zmeškaný hovor ti vždycky přijde jako zpráva do "
+        "chatu. Tohle určuje, co uslyší volající:</p>%s</div>"
+        '<div class="card"><h2 style="margin-top:0">Ostrovní režim</h2>'
+        "<p class=\"muted\">Záloha internetu z mobilních dat, když vypadne "
+        "linka:</p>%s</div></div>"
+    ) % (info, "".join(tiles), missed, islandform))
 
 
 def page_status(mode_info=""):
+    """Expert režim = domovská stránka, GUI režim = záložka Pokročilé.
+    Nastavení (zmeškané hovory, ostrovní režim) žije v GUI na dashboardu,
+    tady se v GUI neopakuje."""
     dev = cli("quectel show devices")
     state = cli("quectel show device state " + DEVICE)
     contacts = cli("pjsip show contacts")
     chans = cli("core show channels")
     q = read_queue()
-    qbadge = ('<span class="warn">%d SMS čeká ve frontě</span>' % len(q)) if q \
-        else '<span class="ok">fronta prázdná</span>'
+    qbadge = ('<span class="warn"><span class="dot warn"></span>%d SMS čeká ve '
+              "frontě</span>" % len(q)) if q else \
+        '<span class="ok"><span class="dot ok"></span>fronta prázdná</span>'
     wd = read_watchdog()
-    wdblock = ('<pre>%s</pre>' % esc("\n".join(wd))) if wd else \
-        '<p><span class="ok">watchdog zatím nikdy nezasáhl</span></p>'
-    mode = get_missed_mode()
-    modeblock = (
-        '%s<form class="inline" method="post" action="/missed-mode">'
-        '<label><input type="radio" name="mode" value="ring"%s> '
-        "vyzvánět naprázdno (~30 s, hovor se nepřijme, volajícímu se neúčtuje)</label>"
-        '<label><input type="radio" name="mode" value="announce"%s> '
-        "hláska nedostupnosti (hovor se přijme — volajícímu se může účtovat)</label>"
-        "<button>Uložit</button></form>"
-        "<small>Zmeškaný hovor při offline telefonu vždy pošle notifikaci do "
-        "chatu (od čísla volajícího), doručí se po znovupřipojení.</small>"
-    ) % (mode_info,
-         ' checked' if mode == "ring" else '',
-         ' checked' if mode == "announce" else '')
-    return render("status", (
+    wdblock = ("<pre>%s</pre>" % esc("\n".join(wd))) if wd else \
+        '<p><span class="ok"><span class="dot ok"></span>watchdog zatím nikdy ' \
+        "nezasáhl</span></p>"
+    body = (
+        "<h1>%s</h1>"
         "<h2>Modem</h2><pre>%s</pre>"
         "<h2>Detail zařízení</h2><pre>%s</pre>"
         "<h2>SIP registrace softphonu</h2><pre>%s</pre>"
         "<h2>Hovory</h2><pre>%s</pre>"
         "<h2>SMS fronta</h2><p>%s</p>"
-        "<h2>Nedostupný telefon — chování k volajícímu</h2>%s"
         "<h2>Watchdog modemu</h2>%s"
-        '<p><button onclick="location.reload()">Obnovit</button></p>'
-    ) % (esc(dev), esc(state), esc(contacts), esc(chans), qbadge, modeblock,
-         wdblock))
+    ) % ("Pokročilé" if GUI else "Stav brány",
+         esc(dev), esc(state), esc(contacts), esc(chans), qbadge, wdblock)
+    if not GUI:
+        mode = get_missed_mode()
+        island = get_island_mode()
+        body += (
+            "<h2>Nedostupný telefon — chování k volajícímu</h2>%s"
+            '<form method="post" action="%s">%s%s'
+            '<button style="margin-top:.5rem">Uložit</button></form>'
+            '<p class="muted">Zmeškaný hovor při offline telefonu vždy pošle '
+            "notifikaci do chatu (od čísla volajícího), doručí se po "
+            "znovupřipojení.</p>"
+            "<h2>Ostrovní režim</h2>"
+            '<form method="post" action="%s">%s%s'
+            '<button style="margin-top:.5rem">Uložit</button></form>'
+        ) % (mode_info, u("/missed-mode"),
+             _choice("mode", "ring", mode, "Vyzvánět naprázdno",
+                     "~30 s, hovor se nepřijme, volajícímu se neúčtuje"),
+             _choice("mode", "announce", mode, "Hláska nedostupnosti",
+                     "hovor se přijme — volajícímu se může účtovat"),
+             u("/island-mode"),
+             _choice("island", "off", island, "Vypnuto",
+                     "jen primární linka, mobilní data se nepoužijí"),
+             _choice("island", "on", island, "Zapnuto",
+                     "při výpadku linky default route přes wwan0 (data se "
+                     "účtují)"))
+    body += '<p><button class="ghost" onclick="location.reload()">Obnovit</button></p>'
+    return render("status", body)
 
 
 def page_sms(sent_info=""):
@@ -514,8 +631,8 @@ def page_sms(sent_info=""):
             esc(r["status"]), esc(r["from"]), esc(r["msg"])) for r in rows) \
         or '<tr><td colspan="4"><small>žurnál je prázdný</small></td></tr>'
     return render("sms", (
-        "%s<h2>Poslat SMS</h2>"
-        '<form class="inline" method="post" action="/sms/send">'
+        "%s<h1>Zprávy</h1><h2>Poslat SMS</h2>"
+        '<form class="inline" method="post" action="' + u("/sms/send") + '">'
         '<input name="to" placeholder="+420..." required pattern="[+0-9]{6,16}">'
         '<input name="text" placeholder="text zprávy" required size="40" maxlength="459">'
         "<button>Odeslat</button></form>"
@@ -538,7 +655,7 @@ def page_net(info=""):
     pending = os.path.exists(os.path.join(TS_DIR, "authkey"))
     sec = read_secrets()
     dash = os.environ.get("NET_DASHBOARD_URL", "https://cockscale.twentyone.cz")
-    blocks = [info, "<h2>Privátní síť</h2>"]
+    blocks = [info, "<h1>Privátní síť</h1>"]
     if ip:
         blocks.append('<p><span class="ok">Brána je připojená — adresa v privátní '
                       "síti: <b>%s</b></span></p>" % esc(ip))
@@ -551,11 +668,12 @@ def page_net(info=""):
         "<p>%s auth klíč z <a href=\"%s\" target=\"_blank\">dashboardu "
         "privátní sítě</a> (Přidat zařízení; klíč platí 24 h a zobrazí se "
         "jen jednou):</p>"
-        '<form class="inline" method="post" action="/net/authkey">'
+        '<form class="inline" method="post" action="%s">'
         '<input name="authkey" placeholder="hskey-auth-..." size="40" required>'
         "<button>Připojit</button></form>"
         % ("Nové připojení / obnova po expiraci — vlož" if ip else
-           "Brána zatím není v privátní síti. Vlož", esc(dash)))
+           "Brána zatím není v privátní síti. Vlož", esc(dash),
+           u("/net/authkey")))
     if ip:
         blocks.append(
             '<p>Krabička je v síti — teď připoj telefon na záložce '
@@ -627,20 +745,20 @@ nepovede, vrať se a vygeneruj si nový.</p>
     # A) schéma linphone-config: otevře appku přímo z fotoaparátu systému
     #    (obchází vestavěný skener, který bývá nespolehlivý)
     # C) holé URL pro skener uvnitř Linphone; nižší korekce = řidší kód
-    body += """<script src="%s"></script><script>
+    extra = """<script src="%s"></script><script>
 new QRCode(document.getElementById("qr"), {text: %s, width: 280, height: 280,
   correctLevel: QRCode.CorrectLevel.L});
 new QRCode(document.getElementById("qr2"), {text: %s, width: 220, height: 220,
   correctLevel: QRCode.CorrectLevel.L});
 </script>""" % (u("/static/qrcode.min.js"),
                 json.dumps("linphone-config:" + url), json.dumps(url))
-    return render("phone", body)
+    return render("phone", body, extra)
 
 
 def page_diag(at_info=""):
     return render("diag", (
         "%s<h2>AT příkaz</h2>"
-        '<form class="inline" method="post" action="/diag/at">'
+        '<form class="inline" method="post" action="' + u("/diag/at") + '">'
         '<input name="cmd" placeholder="AT+CSQ" required size="30">'
         "<button>Poslat</button></form>"
         "<small>Odpověď dorazí asynchronně — objeví se v logu níže "
@@ -719,6 +837,20 @@ class Handler(BaseHTTPRequestHandler):
             saved = get_missed_mode()
             info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
                 else '<p class="bad">Zápis se nepotvrdil — zkontroluj AMI/AstDB.</p>'
+            return self._html(page(info))
+        if self.path == "/island-mode":
+            page = page_home if GUI else page_status
+            want = form.get("island", "")
+            if want not in ("on", "off"):
+                return self._html(page('<p class="bad">Neplatná volba.</p>'))
+            # Smyčka wwan.sh watch se na tenhle klíč ptá před každým cyklem,
+            # takže přepnutí se projeví do jednoho intervalu bez restartu.
+            cli("database put gsm2sip island_mode " + want)
+            saved = get_island_mode()
+            info = ('<p class="ok">Ostrovní režim: %s.</p>'
+                    % ("zapnuto" if saved == "on" else "vypnuto")) \
+                if saved == want else \
+                '<p class="bad">Zápis se nepotvrdil — zkontroluj AMI/AstDB.</p>'
             return self._html(page(info))
         if self.path == "/sms/send":
             to = "".join(c for c in form.get("to", "") if c in "+0123456789")

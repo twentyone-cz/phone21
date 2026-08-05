@@ -91,8 +91,26 @@ case "${1:-}" in
     ;;
   watch)
     log "failover watch: kontrola $CHECK_HOST po ${CHECK_INT}s, práh $FAIL_N"
+    # Zapnuto/vypnuto se řídí za běhu z web UI (AstDB gsm2sip/island_mode).
+    island_on() {
+      asterisk -rx "database get gsm2sip island_mode" 2>/dev/null | grep -q "Value: on"
+    }
+    if [[ ! -c "$DEV" || ! -d "/sys/class/net/$IF" ]]; then
+      log "modem není vidět jako datové zařízení ($DEV / $IF) — hlídka končí"
+      exit 0
+    fi
     fails=0; active=0
     while true; do
+      if ! island_on; then
+        if [[ $active -eq 1 ]]; then
+          log "ostrovní režim vypnut v nastavení — vracím modem do standby"
+          ip route replace default dev "$IF" metric "$M_STANDBY" 2>/dev/null
+          active=0
+        fi
+        fails=0
+        sleep "$CHECK_INT"
+        continue
+      fi
       if primary_ok; then
         fails=0
         if [[ $active -eq 1 ]]; then
