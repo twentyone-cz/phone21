@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.7
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.7@sha256:7d04aeebdff474c5500d22f675ff8c69b2b493d37d59242d21c7a15fe7993495
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
     environment:
@@ -50,7 +50,7 @@ services:
     # (Linphone se neumí přihlásit), chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.7
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.7@sha256:f55b179a78e7d2cdce735237001afd16d9c01eb610484728dfad87e435357e9a
     restart: on-failure
     environment:
       TZ: ${TZ:-Europe/Prague}
