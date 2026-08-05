@@ -2,13 +2,10 @@
 # GSM2SIP — entrypoint kontejneru asterisk.
 #
 # Dva režimy:
-#  - LXC/klasika (default): /etc/asterisk dodává bind-mount vyrenderovaný
-#    hostitelským configure.sh → entrypoint nic nerenderuje a jen spustí
-#    Asterisk (chování beze změny).
-#  - Umbrel/selfkonfigurace (GSM2SIP_SELFCONFIG=1): /etc/asterisk se
-#    renderuje při KAŽDÉM startu ze šablon zapečených v image
-#    (/opt/gsm2sip/templates) + env; tajemství se generují při prvním běhu
-#    a persistují v /var/lib/gsm2sip/secrets.env (volume).
+#  - default: /etc/asterisk dodává bind-mount (vyrenderovaný configure.sh),
+#    entrypoint jen spustí Asterisk;
+#  - GSM2SIP_SELFCONFIG=1: konfigurace se renderuje při každém startu ze
+#    šablon v image; tajemství se generují jednou a persistují ve volume.
 #
 # Volitelné interní služby (Umbrel nemá host systemd):
 #   WATCHDOG_INTERNAL=1  hlídání modemu → restart procesu Asterisku

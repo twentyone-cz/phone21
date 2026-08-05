@@ -7,8 +7,7 @@
 #   ./install-mbn.sh --uninstall # vypni a odstraň
 #
 # Profil se volí v .env brány proměnnou MBN_PROFILE (auto|off|<název>),
-# viz scripts/mbn-profile.sh. Služba běží po každém bootu — mcfg autoselect
-# při resetu modemu volbu vrací, takže ji je potřeba obnovovat.
+# viz scripts/mbn-profile.sh. Služba běží po každém bootu.
 
 set -euo pipefail
 

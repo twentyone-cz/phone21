@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
-# GSM2SIP — správa Qualcomm MBN carrier profilu modemu (VoLTE)
+# GSM2SIP — carrier profil modemu (potřebný pro VoLTE)
 #
-#   mbn-profile.sh auto              # vybrat a aktivovat profil dle operátora SIM
+#   mbn-profile.sh auto              # vybrat a aktivovat profil dle SIM
 #   mbn-profile.sh status            # aktivní profil + stav IMS registrace
-#   mbn-profile.sh list              # všechny profily ve firmwaru
-#   mbn-profile.sh activate <název>  # ručně aktivovat profil podle Description
+#   mbn-profile.sh list              # profily dostupné ve firmwaru modemu
+#   mbn-profile.sh activate <název>  # ruční volba profilu
 #
-# Proč: mcfg autoselect vybírá profil podle SIM při každém bootu modemu;
-# pro operátory bez shody (např. T-Mobile CZ) spadne na profil, se
-# kterým IMS registrace neproběhne a hovory padají CSFB do 2G. `auto` vybere
-# profil z tabulky OPERÁTOR→PROFIL a aktivuje ho za horka (bez resetu
-# modemu, ověřeno 2026-08-04). Spouští se po bootu ze systemd
-# (install-mbn.sh), protože autoselect volbu při resetu modemu vrací.
+# Volbu je potřeba po startu obnovovat (dělá install-mbn.sh přes systemd).
 #
 # Nastavení v .env brány:
 #   MBN_PROFILE=auto        # default: vybrat z tabulky podle home network SIM
@@ -21,8 +16,7 @@
 # Vyžaduje: libqmi-utils a /dev/cdc-wdm0 (na LXC: lxc.cgroup2.devices.allow
 # c 180:* rwm + lxc.mount.entry /dev/cdc-wdm0 v konfiguraci kontejneru).
 #
-# POZOR: aktivace profilu je vratná (activate <původní>), ale NEmazat
-# profily (--pdc-delete-config) — přišli bychom o ně bez možnosti návratu.
+# Aktivace je vratná; profily NEmazat.
 
 set -u
 DEV="${MBN_QMI_DEV:-/dev/cdc-wdm0}"
@@ -51,16 +45,14 @@ id_by_desc() { # $1 = Description
   list_raw | awk -v want="$1" '/Description:/{d=$2} /ID:/{if (d==want) print $2}'
 }
 
-# Tabulka operátor (MCC-MNC home network SIM) → profil. Rozšiřovat dle
-# nasazení; názvy musí odpovídat Description z `list` (firmware firmware:
-# profil, profil, profil, profil,
-# profil, VF_Germany/Italy/Portugal/Spain/Turkey/UK_VoLTE, ...).
+# Tabulka operátor (MCC-MNC domácí sítě SIM) → profil. Názvy musí odpovídat
+# hodnotám z `mbn-profile.sh list` na konkrétním firmwaru.
 profile_for_operator() {
   case "$1" in
-    230-1)  echo "profil" ;;      # T-Mobile CZ (skupina DT)
-    262-1)  echo "profil" ;;      # Telekom DE
-    262-2)  echo "profil" ;;   # Vodafone DE
-    230-3)  echo "profil" ;;   # Vodafone CZ (skupina VF — bez záruky)
+    230-1)  echo "profil" ;;
+    262-1)  echo "profil" ;;
+    262-2)  echo "profil" ;;
+    230-3)  echo "profil" ;;
     *)      echo "" ;;
   esac
 }

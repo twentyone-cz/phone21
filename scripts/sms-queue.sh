@@ -51,13 +51,8 @@ case "${1:-}" in
     delay=$(( 60 * (1 << shift_n) ))
     [ "$delay" -gt "$MAXDELAY" ] && delay=$MAXDELAY
     when=$(( now + delay ))
-    # Tmp soubor NESMÍ vzniknout přímo ve spool adresáři: pbx_spool sleduje
-    # přes inotify i inotify/inotify a dotfiles nefiltruje — soubor
-    # měl při zavření mtime=teď (budoucí čas nastavuje až touch) a odpálil se
-    # OKAMŽITĚ. S offline telefonem to byla těsná smyčka enqueue→fire→enqueue
-    # (2026-08-03 shodila celé LXC). Podadresář .tmp inotify nevidí (watch
-    # není rekurzivní); mv na stejném fs je atomický a spool uvidí až
-    # inotify s hotovým budoucím mtime — ten pbx_spool plánuje korektně.
+    # Tmp soubor NESMÍ vzniknout přímo ve spool adresáři — musí se do něj
+    # přesunout hotový (viz NOTBEFORE pojistka v dialplanu). Neměnit.
     # 777, protože skript běží střídavě pod root (docker exec, testy) a pod
     # asterisk (System() z dialplanu) — bez toho adresář založený rootem
     # zablokuje zápisy asteriska a call file tiše nevznikne.
