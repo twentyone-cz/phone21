@@ -487,7 +487,7 @@ def page_diag(at_info=""):
         '<input name="cmd" placeholder="AT+CSQ" required size="30">'
         "<button>Poslat</button></form>"
         "<small>Odpověď dorazí asynchronně — objeví se v logu níže "
-        "(Got Response). Neposílej zakázaný AT příkaz!</small>"
+        "(Got Response). Pozor, některé AT příkazy modem rozbijí.</small>"
         "<h2>Log Asterisku (tail)</h2><pre>%s</pre>"
         '<p><button onclick="location.reload()">Obnovit</button></p>'
     ) % (at_info, esc(tail_log())))

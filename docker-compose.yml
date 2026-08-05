@@ -1,18 +1,15 @@
-# GSM2SIP — Asterisk + chan_quectel brána (výrobce modem, sériové PCM audio)
+# GSM2SIP — brána: Asterisk + ovladač LTE modemu
 #
 # Před prvním startem: cp .env.example .env, doplnit hodnoty, spustit ./configure.sh
 # (vygeneruje konfiguraci do ${ASTERISK_CONF_DIR}, default ./runtime/asterisk).
 #
-# Známé omezení: Docker rozbalí by-id symlink jednou, při vytvoření kontejneru.
-# Odpojení/zapojení modemu za běhu => kontejner drží mrtvou referenci a potřebuje
-# restart (sudo docker restart asterisk). Neřešit teď (viz zadání).
+# Známé omezení: Docker rozbalí symlink zařízení jen při vytvoření kontejneru.
+# Po odpojení/zapojení modemu je potřeba kontejner restartovat.
 
 services:
   asterisk:
-    # Vlastní image (Asterisk 20 + RoEdAl chan_quectel) — starší image image
-    # segfaultoval při DTMF a neumí dsci hangup detection. První start:
-    #   sudo docker compose build
-    # Fallback na původní image: ASTERISK_IMAGE v .env (viz .env.example).
+    # Vlastní image (viz docker/). První start: docker compose build.
+    # Override image: ASTERISK_IMAGE v .env.
     image: ${ASTERISK_IMAGE:-gsm2sip-asterisk:local}
     # context = kořen repa: Dockerfile peče i asterisk/ šablony a scripts/
     # (selfkonfigurace pro Umbrel; LXC režim se nemění — viz entrypoint.sh)
