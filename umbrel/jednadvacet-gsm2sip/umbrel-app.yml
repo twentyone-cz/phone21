@@ -2,7 +2,7 @@ manifestVersion: 1
 id: jednadvacet-gsm2sip
 category: networking
 name: jednadvacet phone
-version: "0.9.8"
+version: "0.9.9"
 tagline: Vlastní GSM brána — hovory a SMS z tvé SIM kamkoli přes SIP
 description: >-
   GSM2SIP promění USB LTE modem se SIM kartou v soukromou telefonní bránu:

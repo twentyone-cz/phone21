@@ -597,30 +597,38 @@ def page_qr(url):
     """QR s odkazem na konfiguraci — Linphone: Asistent → Načíst vzdálenou
     konfiguraci → naskenovat."""
     body = """<h1>Připojení telefonu</h1>
-<p>V telefonu otevři <b>Linphone</b> a zvol <b>Načíst vzdálenou konfiguraci</b>
-(„Fetch Remote Configuration"). Pak si vyber, co ti sedne:</p>
+<p>Nejdřív si v telefonu nainstaluj <b>Linphone</b>. Pak zvol jednu ze tří
+cest — první je nejspolehlivější:</p>
 
-<h2>A) Naskenovat</h2>
+<h2>A) Naskenovat běžným fotoaparátem <span class="badge">doporučeno</span></h2>
+<p>Otevři v telefonu <b>fotoaparát</b> (ne Linphone) a namiř ho sem.
+Vyskočí odkaz — ťukni na něj a Linphone se nastaví sám.</p>
 <div id="qr" class="qr"></div>
 
-<h2>B) Opsat odkaz</h2>
-<p>Když skener nefunguje (na některých systémech nemá přístup k foťáku),
-vlož do pole pro URL tohle — je to krátké schválně:</p>
-<p class="mono" style="font-size:1.3rem;letter-spacing:.02em">%s</p>
+<h2>B) Opsat odkaz do Linphone</h2>
+<p>V Linphone: <b>Nastavení → Pokročilá nastavení → Remote provisioning
+URL</b> → vlož tohle a dej <b>Download &amp; apply</b>:</p>
+<p class="mono" style="font-size:1.25rem;letter-spacing:.02em">%s</p>
 
-<h2>C) Otevřít odsud</h2>
-<p>Když si tuhle stránku otevřeš rovnou <b>v telefonu</b>, stačí ťuknout:</p>
-<p><a class="btn" href="%s">Nastavit Linphone</a></p>
+<h2>C) Skener uvnitř Linphone</h2>
+<p>Jen když ti fungoval dřív (v některých verzích je nespolehlivý):
+Přidat účet → <b>Scan QR code</b> a namiř na kód níž.</p>
+<div id="qr2" class="qr" style="max-width:220px"></div>
 
 <p class="small muted">Odkaz platí <b>10 minut</b> a jen na jedno použití;
 obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší nebo se
 nepovede, vrať se a vygeneruj si nový.</p>
-<p><a href="%s">Zpět</a></p>""" % (
-        esc(url), esc("sip-linphone:?linphone-fetch-config=" + url), u("/telefon"))
+<p><a href="%s">Zpět</a></p>""" % (esc(url), u("/telefon"))
+    # A) schéma linphone-config: otevře appku přímo z fotoaparátu systému
+    #    (obchází vestavěný skener, který bývá nespolehlivý)
+    # C) holé URL pro skener uvnitř Linphone; nižší korekce = řidší kód
     body += """<script src="%s"></script><script>
-new QRCode(document.getElementById("qr"), {text: %s, width: 260, height: 260,
-  correctLevel: QRCode.CorrectLevel.M});
-</script>""" % (u("/static/qrcode.min.js"), json.dumps(url))
+new QRCode(document.getElementById("qr"), {text: %s, width: 280, height: 280,
+  correctLevel: QRCode.CorrectLevel.L});
+new QRCode(document.getElementById("qr2"), {text: %s, width: 220, height: 220,
+  correctLevel: QRCode.CorrectLevel.L});
+</script>""" % (u("/static/qrcode.min.js"),
+                json.dumps("linphone-config:" + url), json.dumps(url))
     return render("phone", body)
 
 
