@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.9
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.10
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -59,7 +59,7 @@ services:
     # (Linphone se neumí přihlásit), chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.9
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.10
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped
@@ -72,6 +72,7 @@ services:
       AMI_HOST: host.docker.internal
       AMI_SECRETS_FILE: /var/lib/gsm2sip/secrets.env
       TS_DIR: /var/lib/gsm2sip/ts
+      ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

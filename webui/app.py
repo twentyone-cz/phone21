@@ -32,6 +32,8 @@ COUNTRY_CODE = os.environ.get("COUNTRY_CODE", "420")
 # (AMI_PASSWORD env pak není nastavené) a privátní síť se ovládá přes TS_DIR.
 AMI_SECRETS_FILE = os.environ.get("AMI_SECRETS_FILE", "")
 TS_DIR = os.environ.get("TS_DIR", "")
+# Jméno účtu zobrazené v softphonu (přihlašovací jméno zůstává interní)
+ACCOUNT_LABEL = os.environ.get("ACCOUNT_LABEL", "myGSM")
 # UI režim: "expert" = technické záložky (Docker/LXC default),
 # "gui" = spotřebitelský dashboard (Umbrel appka) s technikou pod Pokročilé.
 UI_MODE = os.environ.get("UI_MODE", "expert")
@@ -196,12 +198,14 @@ def prov_xml(domain):
     sec = read_secrets()
     user = sec.get("SIP_USER", SIP_USER)
     password = sec.get("SIP_PASSWORD", "")
-    ident = "sip:%s@%s" % (user, domain)
+    ident = '&quot;%s&quot; &lt;sip:%s@%s&gt;' % (
+        html.escape(ACCOUNT_LABEL), html.escape(user), html.escape(domain))
     return """<?xml version="1.0" encoding="UTF-8"?>
 <config xmlns="http://www.linphone.org/xsds/lpconfig.xsd">
   <section name="proxy_0">
     <entry name="reg_proxy">&lt;sip:%(domain)s;transport=udp&gt;</entry>
     <entry name="reg_identity">%(ident)s</entry>
+    <entry name="reg_display_name">%(label)s</entry>
     <entry name="reg_expires">600</entry>
     <entry name="reg_sendregister">1</entry>
     <entry name="publish">0</entry>
@@ -223,7 +227,8 @@ def prov_xml(domain):
     <entry name="register_only_when_network_is_up">1</entry>
   </section>
 </config>
-""" % {"domain": html.escape(domain), "ident": html.escape(ident),
+""" % {"domain": html.escape(domain), "ident": ident,
+       "label": html.escape(ACCOUNT_LABEL),
        "user": html.escape(user), "passwd": html.escape(password)}
 
 
