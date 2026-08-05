@@ -21,9 +21,9 @@
 # adresy z DHCP a přišpendlení na jednu IP je nejběžnější způsob, jak se
 # z brány vyzamknout.
 #
-# Pozor na past: eth0 brány má z DHCP masku /24, ale LAN je ve skutečnosti /20
-# (<IP> – <IP>). Odvozovat rozsah z masky rozhraní by tu
-# odřízlo většinu sítě.
+# PŘED NASAZENÍM UPRAV na svou správcovskou síť. Pozor na past: rozhraní
+# může mít z DHCP masku /24, zatímco LAN je ve skutečnosti větší (např. /20)
+# — odvozovat rozsah z masky rozhraní pak odřízne většinu sítě.
 define MGMT_NET   = { 192.168.1.0/24 }
 # Tunel = privátní síť CockScale (tailscale0). WireGuard zrušen bez náhrady
 # 2026-08-04 — z veřejné IP už brána nepřijímá NIC (tailscale navazuje
@@ -90,7 +90,7 @@ table inet gsm2sip {
     type filter hook forward priority filter; policy accept;
 
     # Telefon je v tunelu kvůli bráně, ne kvůli přístupu do LAN — brána
-    # nemá být routerem do <IP>/24. Policy zůstává accept, aby se
+    # nemá být routerem do domácí LAN. Policy zůstává accept, aby se
     # nerozbilo forwardování Dockeru, kdyby se někdy použil bridge network.
     iifname $TUN_IFS oifname != $TUN_IFS drop
   }
