@@ -10,3 +10,9 @@ docs/cockscale-integrace.md
 docs/vyvoj-log.md
 docs/telefon-gos.md
 docs/technicke-poznamky.md
+
+# Android build (APK a gradle cache se do repa nedávají)
+android/dialer/.gradle/
+android/dialer/build/
+android/dialer/app/build/
+android/dialer/local.properties
