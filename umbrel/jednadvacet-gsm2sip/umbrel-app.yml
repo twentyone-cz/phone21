@@ -34,5 +34,8 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  První vydání pro Umbrel: kompletní brána (hovory, SMS, zmeškané hovory,
-  VoLTE) se selfkonfigurací a volitelným připojením do privátní sítě.
+  Nový vzhled ovládání: přehledný dashboard se stavem sítě, telefonu
+  a poslední zprávy. Ostrovní režim (náhradní internet z mobilních dat,
+  když vypadne linka) se nově zapíná přímo v aplikaci. Záložka Telefon se
+  odemkne, až je krabička v privátní síti — dřív by nastavení stejně
+  nefungovalo. Nastavení zmeškaných hovorů je na jednom místě.
