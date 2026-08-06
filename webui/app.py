@@ -14,6 +14,8 @@ import re
 import socket
 import threading
 import time
+import urllib.error
+import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -193,7 +195,62 @@ def prov_claim(token):
         return True
 
 
-def prov_xml(domain):
+PARTNER_URL = os.environ.get("COCKSCALE_URL", "https://cockscale.twentyone.cz")
+
+
+def partner_token_path():
+    return os.path.join(DATA_DIR, "partner_token")
+
+
+def read_partner_token():
+    try:
+        with open(partner_token_path()) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def save_partner_token(token):
+    fd = os.open(partner_token_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token)
+
+
+PARTNER_ERRORS = {
+    "bad_token": "Token brány neplatí — vydej si nový v účtu sítě.",
+    "no_credits": "Síť je pozastavená — v účtu chybí kredit.",
+    "device_limit": "Vyčerpaný limit zařízení na účtu sítě.",
+    "coordinator": "Koordinátor sítě teď neodpovídá, zkus to za chvíli.",
+}
+
+
+def request_network_key():
+    """Vyžádá jednorázový klíč do privátní sítě pro telefon.
+    Vrací (klíč, adresa_koordinátora, chyba_pro_uživatele)."""
+    token = read_partner_token()
+    if not token:
+        return "", "", ""      # bez tokenu se prostě QR omezí na účet
+    req = urllib.request.Request(
+        PARTNER_URL.rstrip("/") + "/partner/preauthkeys", method="POST",
+        headers={"Authorization": "Bearer " + token, "Content-Length": "0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        return data.get("key", ""), data.get("login_server", PARTNER_URL), ""
+    except urllib.error.HTTPError as e:
+        try:
+            reason = json.loads(e.read()).get("error", "")
+        except Exception:
+            reason = ""
+        if e.code == 429:
+            return "", "", "Moc pokusů po sobě — zkus QR za minutu."
+        return "", "", PARTNER_ERRORS.get(
+            reason, "Klíč do sítě se nepodařilo získat (%d)." % e.code)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return "", "", "Koordinátor sítě je nedostupný: %s" % e
+
+
+def prov_xml(domain, ts_url="", ts_key=""):
     """Konfigurace účtu pro Linphone (remote provisioning)."""
     sec = read_secrets()
     user = sec.get("SIP_USER", SIP_USER)
@@ -225,11 +282,25 @@ def prov_xml(domain):
   </section>
   <section name="sip">
     <entry name="register_only_when_network_is_up">1</entry>
-  </section>
+  </section>%(network)s
 </config>
 """ % {"domain": html.escape(domain), "ident": ident,
        "label": html.escape(ACCOUNT_LABEL),
-       "user": html.escape(user), "passwd": html.escape(password)}
+       "user": html.escape(user), "passwd": html.escape(password),
+       "network": network_section(ts_url, ts_key)}
+
+
+def network_section(ts_url, ts_key):
+    """Přihlášení do privátní sítě přibalené k účtu — aplikace si podle něj
+    postaví tunel dřív, než se pokusí o registraci. Klíč je jednorázový
+    a platí hodinu."""
+    if not (ts_url and ts_key):
+        return ""
+    return """
+  <section name="twentyone">
+    <entry name="ts_control_url">%s</entry>
+    <entry name="ts_authkey">%s</entry>
+  </section>""" % (html.escape(ts_url), html.escape(ts_key))
 
 
 MISSED_MODES = ("ring", "announce")
@@ -706,8 +777,22 @@ def page_net(info=""):
            u("/net/authkey")))
     if ip:
         blocks.append(
-            '<p>Krabička je v síti — teď připoj telefon na záložce '
+            '<p>Miniserver je v síti — teď připoj telefon na záložce '
             '<a href="%s">Telefon</a>.</p>' % u("/telefon"))
+    have_partner = bool(read_partner_token())
+    blocks.append(
+        "<h2>Token pro připojení telefonu</h2>"
+        "<p>Aby jeden QR kód nastavil telefonu účet i síť, potřebuje "
+        "miniserver token z tvého účtu sítě (vydá se na "
+        '<a href="%s" target="_blank">%s</a>, sekce token brány). Bez něj '
+        "QR nastaví jen účet a telefon do sítě připojíš ručně.</p>"
+        '<p class="small muted">Stav: %s</p>'
+        '<form class="inline" method="post" action="%s">'
+        '<input name="partner_token" placeholder="cspk_..." size="40" required>'
+        "<button>Uložit token</button></form>"
+        % (esc(dash), esc(dash),
+           "token uložen" if have_partner else "token zatím není",
+           u("/net/partner")))
     return render("net", "".join(blocks))
 
 
@@ -916,6 +1001,18 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 info = '<p class="bad">Nejde uložit klíč: %s</p>' % esc(e)
             return self._html(page_net(info))
+        if self.path == "/net/partner":
+            token = form.get("partner_token", "").strip()
+            if not re.match(r"^cspk_[A-Za-z0-9_-]{10,200}$", token):
+                return self._html(page_net(
+                    '<p class="bad">Tohle nevypadá jako token brány '
+                    "(začíná cspk_).</p>"))
+            try:
+                save_partner_token(token)
+                info = '<p class="ok">Token uložen — QR teď nastaví i síť.</p>'
+            except OSError as e:
+                info = '<p class="bad">Nejde uložit token: %s</p>' % esc(e)
+            return self._html(page_net(info))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
             if not cmd.upper().startswith("AT") or "CUSBPIDSWITCH" in cmd.upper():
@@ -966,7 +1063,9 @@ class ProvHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        data = prov_xml(ip).encode()
+        # klíč do sítě se bere až teď: platí hodinu a telefon ho použije hned
+        ts_key, ts_url, _err = request_network_key()
+        data = prov_xml(ip, ts_url, ts_key).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/xml; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
