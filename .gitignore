@@ -16,3 +16,6 @@ android/dialer/.gradle/
 android/dialer/build/
 android/dialer/app/build/
 android/dialer/local.properties
+
+# Interní: plán přejmenování identifikátorů (obsahuje detaily nasazení)
+docs/prejmenovani-identifikatoru.md
