@@ -682,7 +682,9 @@ def page_net(info=""):
         pass
     pending = os.path.exists(os.path.join(TS_DIR, "authkey"))
     sec = read_secrets()
-    dash = os.environ.get("NET_DASHBOARD_URL", "https://cockscale.twentyone.cz")
+    # zákaznická doména; cockscale.twentyone.cz je jen technická adresa
+    # koordinátora (COCKSCALE_URL) a zákazník ji nemá vidět
+    dash = os.environ.get("NET_DASHBOARD_URL", "https://phone.twentyone.cz/pay")
     blocks = [info, "<h1>Privátní síť</h1>"]
     if ip:
         blocks.append('<p><span class="ok">Brána je připojená — adresa v privátní '

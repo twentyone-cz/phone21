@@ -2,7 +2,7 @@ manifestVersion: 1
 id: jednadvacet-gsm2sip
 category: networking
 name: Phone21
-version: "0.9.14"
+version: "0.9.15"
 tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
   Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
@@ -34,7 +34,5 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Ostrovní režim (náhradní internet z mobilních dat) hlídá kvalitu hlasu:
-  bez ní hovor přepne modem do starší sítě a data na tu dobu vypadnou —
-  aplikace to napíše a spojení po hovoru sama postaví znovu. Připojení
-  telefonu ukazuje jediný QR kód, odkaz k opsání zůstal jako záloha.
+  Odkaz na účet privátní sítě vede na phone.twentyone.cz (záložka Síť
+  odkazovala na technickou adresu koordinátora). Jinak beze změny.

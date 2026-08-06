@@ -16,7 +16,7 @@ services:
   webui:
     environment:
       TS_DIR: /var/lib/gsm2sip/ts
-      NET_DASHBOARD_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
+      NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/pay}
     volumes:
       - ./runtime/smsdata/ts:/var/lib/gsm2sip/ts:rw
 

@@ -63,6 +63,7 @@ services:
       TS_DIR: /var/lib/gsm2sip/ts
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
       UI_MODE: gui             # spotřebitelský dashboard (Docker default = expert)
+      NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/pay}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
