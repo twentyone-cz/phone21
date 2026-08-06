@@ -78,7 +78,7 @@ WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d
   a naskenuj ho v aplikaci. Tím se telefon připojí do tvé privátní sítě
   i k miniserveru — nic dalšího se nevyplňuje.</li>
   <li>Hotovo — voláš a píšeš ze svého čísla odkudkoli. Důležité pro
-  Android: nepoužíváme Google push notifikace (žádný Google prostředník
+  Android: Google push notifikace se nepoužívají (žádný Google prostředník
   mezi tebou a tvým telefonem) — aplikace proto musí smět běžet na pozadí.
   Nastav ji v systému na <i>Baterie → Neomezeno</i>, jinak tě hovor
   nemusí dozvonit.</li>
@@ -96,9 +96,9 @@ na to přepínač v rozhraní.</p>
 <div class="honest">
   <p>Koordinační server privátní sítě nutně vidí veřejné IP adresy tvých
   zařízení (jinak se nenajdou) a čas připojení — nikdy obsah hovorů ani
-  zpráv, ten jde šifrovaně mezi telefonem a miniserverem. A protože nemáme
-  žádnou tvoji identitu (žádné jméno, e-mail ani telefonní číslo), samotná
-  IP adresa u nás k identifikaci osoby nevede. Po zrušení účtu data mažeme.</p>
+  zpráv, ten jde šifrovaně mezi telefonem a miniserverem. A protože o tobě
+  neexistuje žádná identita (žádné jméno, e-mail ani telefonní číslo), samotná
+  IP adresa k identifikaci osoby nevede. Po zrušení účtu se data mažou.</p>
   <p><b>Na co pozor:</b> hovory a SMS jdou z tvého miniserveru do běžné mobilní
   sítě přes tvého operátora — úplně stejně, jako bys volal z obyčejného
   telefonu. Operátor je vidí a podléhají zákonnému odposlechu. Tahle služba

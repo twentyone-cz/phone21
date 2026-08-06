@@ -26,7 +26,7 @@ Produktové stránky: [phone.twentyone.cz](https://phone.twentyone.cz).
 Miniserver (Raspberry Pi 4/5 nebo cokoli s Dockerem, x86 i ARM), podporovaný
 USB LTE modem a SIM karta. Ne každý modem se pro hlas hodí — výběr, napájení
 a nastavení modemu jsou u téhle třídy hardwaru nejotravnější část. Odladěné
-sestavy prodáváme hotové: <https://phone.twentyone.cz/obchod/>.
+sestavy jsou k mání hotové: <https://phone.twentyone.cz/obchod/>.
 
 ## Instalace
 
