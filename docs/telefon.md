@@ -115,9 +115,12 @@ jen mezi tvým telefonem a miniserverem, nikam jinam telefon přes ni nevidí.
 **Účet se nastavuje naskenováním QR kódu**, ne ručně: v ovládání
 miniserveru záložka *Telefon* → *Zobrazit QR*. Kód nese jednorázový odkaz
 na konfiguraci (platí 10 minut, jedno použití) a přečte ho jak skener
-přímo v aplikaci Phone21, tak běžný fotoaparát telefonu. Aplikace si z něj
-sama nastaví připojení k privátní síti i telefonní účet — není potřeba nic
-vyplňovat ručně.
+přímo v aplikaci Phone21, tak běžný fotoaparát telefonu. Když skener
+nespolupracuje, jde odkaz opsat ručně — je pod QR kódem.
+
+Do privátní sítě se telefon zatím připojuje zvlášť: v aplikaci
+*Nastavení → Privátní síť → Připojit* a potvrzení peněženkou v prohlížeči.
+(Spojení obojího do jediného QR kódu se připravuje.)
 
 ### Spolehlivé doručení hovorů
 

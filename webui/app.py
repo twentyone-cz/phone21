@@ -140,7 +140,7 @@ def cli(cmd):
     try:
         return ami_call(lambda a: a.command(cmd))
     except Exception as e:  # UI nesmí spadnout kvůli AMI výpadku
-        return "CHYBA AMI: %s" % e
+        return "Chyba spojení s telefonní částí: %s" % e
 
 
 def normalize_msisdn(num, cc=None):
@@ -462,7 +462,7 @@ def ts_ip():
 def modem_summary():
     """Klíčové položky z `quectel show device state` pro dashboard."""
     out = cli("quectel show device state " + DEVICE)
-    if out.startswith("CHYBA AMI"):
+    if out.startswith("Chyba spojení s telefonní částí"):
         return None
     d = {}
     for ln in out.splitlines():
