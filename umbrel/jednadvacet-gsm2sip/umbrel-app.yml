@@ -1,31 +1,31 @@
 manifestVersion: 1
 id: jednadvacet-gsm2sip
 category: networking
-name: jednadvacet phone
+name: Phone21
 version: "0.9.14"
-tagline: Vlastní GSM brána — hovory a SMS z tvé SIM kamkoli přes SIP
+tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
-  GSM2SIP promění USB LTE modem se SIM kartou v soukromou telefonní bránu:
-  hovory a SMS z tvého čísla dostaneš do softphonu (Linphone) na mobilu,
-  ať jsi kdekoli — přes privátní šifrovanou síť, bez veřejné IP a bez
-  port forwardu. Zmeškané hovory chodí jako zpráva do chatu, SMS obousměrně,
-  podpora VoLTE (automatická volba carrier profilu modemu).
+  Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
+  hovory a zprávy z tvého čísla dostaneš do aplikace Phone21 v mobilu, ať jsi
+  kdekoli — přes privátní šifrovanou síť, bez veřejné IP a bez port forwardu.
+  Zmeškané hovory chodí jako zpráva, zprávy fungují obousměrně, hovory jdou
+  po datové síti operátora.
 
 
   Potřebuješ podporovaný USB LTE modem a SIM kartu; odladěné sestavy
   a návod najdeš na phone.twentyone.cz. Pro spojení s telefonem na cestách
   je potřeba klíč privátní sítě (bez registrace, platba Lightningem) —
-  na domácí síti funguje appka i bez něj.
+  na domácí síti funguje aplikace i bez něj.
 
 
-  GSM2SIP turns a USB LTE modem with your SIM card into a private phone
-  gateway: calls and SMS from your number reach a softphone anywhere via
-  a private encrypted network — no public IP, no port forwarding needed.
+  Phone21 turns a USB LTE modem with your SIM card into a private phone
+  system: calls and messages from your number reach the Phone21 app anywhere
+  via a private encrypted network — no public IP, no port forwarding needed.
 developer: jednadvacet
-website: https://github.com/twentyone-cz/gsm2sip
+website: https://phone.twentyone.cz
 dependencies: []
-repo: https://github.com/twentyone-cz/gsm2sip
-support: https://github.com/twentyone-cz/gsm2sip/issues
+repo: https://github.com/twentyone-cz/phone21
+support: https://github.com/twentyone-cz/phone21/issues
 port: 8090
 gallery: []
 path: ""
@@ -34,8 +34,7 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Ostrovní režim (náhradní internet z mobilních dat) hlídá VoLTE: bez něj
-  hovor přepne modem do 2G a data na tu dobu vypadnou — aplikace to napíše
-  a spojení po hovoru sama postaví znovu. Stav VoLTE je vidět u mobilní
-  sítě. Připojení telefonu ukazuje jediný QR kód (přečte ho skener
-  v Linphone i běžný fotoaparát), odkaz k opsání zůstal jako záloha.
+  Ostrovní režim (náhradní internet z mobilních dat) hlídá kvalitu hlasu:
+  bez ní hovor přepne modem do starší sítě a data na tu dobu vypadnou —
+  aplikace to napíše a spojení po hovoru sama postaví znovu. Připojení
+  telefonu ukazuje jediný QR kód, odkaz k opsání zůstal jako záloha.

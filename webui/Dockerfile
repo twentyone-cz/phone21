@@ -1,6 +1,6 @@
-# GSM2SIP web UI — čistá stdlib, žádné pip závislosti
+# Phone21 web UI — čistá stdlib, žádné pip závislosti
 FROM python:3.12-slim
-# qrencode: QR s configem WireGuardu pro telefon (záložka Telefon).
+# qrencode: QR kód pro připojení telefonu (záložka Telefon).
 # Systémový balíček, ne pip — pravidlo „žádné pip závislosti" platí dál.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends qrencode \

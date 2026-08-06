@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">jednadvacet dialer</string>
-    <string name="account_label">jednadvacet phone</string>
+    <string name="app_name">Phone21 vytáčení</string>
+    <string name="account_label">Phone21</string>
     <string name="account_description">Hovory přes GSM bránu</string>
 
     <string name="intro">Umožní vytáčet čísla brány odjinud než ze softphonu — hlavně z autorádia přes Bluetooth. Hovor pak uskuteční softphone jako obvykle.</string>
@@ -11,7 +11,7 @@
     <string name="state_enabled">Povolen v systému:</string>
     <string name="yes">ano</string>
     <string name="not_yet">zatím ne</string>
-    <string name="no_softphone">chybí (nainstaluj Linphone)</string>
+    <string name="no_softphone">chybí (nainstaluj aplikaci Phone21)</string>
     <string name="enable_in_settings">ne — zapni ho v Účtech pro volání</string>
 
     <string name="btn_register">Vytvořit telefonní účet</string>

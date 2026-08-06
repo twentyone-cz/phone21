@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>jednadvacet phone — instalace</title>
-<meta name="description" content="Jak rozjet vlastní telefonní krabičku: umbrelOS nebo Docker, připojení telefonu přes privátní síť.">
+<title>Phone21 — instalace</title>
+<meta name="description" content="Jak rozjet vlastní Phone21: miniserver s umbrelOS nebo Dockerem a telefon připojený přes privátní síť.">
 <style>
   :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --acc:#F7931A; --card:#161b22; }
   * { box-sizing:border-box; }
@@ -33,87 +33,83 @@
 <body>
 <nav class="top"><a href="/">Domů</a><a href="/obchod/">Obchod</a><a href="/instalace" class="act">Návod</a><a href="/app">Můj účet</a></nav>
 <header>
-  <a href="/"><img class="logo" src="jednadvacet.svg" alt="jednadvacet"></a>
+  <a href="/"><img class="logo" src="phone21.svg" alt="Phone21"></a>
   <h1>Instalace</h1>
 </header>
 <main>
 
 <div class="req">
-  <b>Co budeš potřebovat:</b> mini-server (Raspberry Pi 4/5, nebo cokoli
+  <b>Co budeš potřebovat:</b> miniserver (Raspberry Pi 4/5, nebo cokoli
   s Dockerem), <b>USB modem</b>, svoji SIM kartu, Lightning peněženku
-  (Phoenix, Zeus, Alby, LNbits…) a ~hodinu času. Hotovou krabičku i modem
+  (Phoenix, Zeus, Alby, LNbits…) a ~hodinu času. Hotový miniserver i modem
   koupíš v <a href="/obchod/">obchodě</a> — za bitcoin, s anonymním doručením.
 </div>
 
-<h2>1. Krabička</h2>
+<h2>1. Miniserver</h2>
 
 <p><b>A) umbrelOS (doporučeno — Raspberry Pi i x86):</b></p>
 <ol class="steps">
   <li>V umbrelOS otevři <i>App Store → ⋯ → Community App Stores</i> → vlož
   <code>https://github.com/twentyone-cz/umbrel-store</code> → Add.</li>
-  <li>Nainstaluj appku <b>GSM2SIP</b>.</li>
-  <li>Zapoj USB modem se SIM a otevři appku — o zbytek se postará sama.</li>
+  <li>Nainstaluj aplikaci <b>Phone21</b>.</li>
+  <li>Zapoj USB modem se SIM a otevři aplikaci — o zbytek se postará sama.</li>
 </ol>
 
 <p><b>B) Obecný Docker (jakýkoli Linux):</b></p>
-<pre>git clone https://github.com/twentyone-cz/gsm2sip && cd gsm2sip
+<pre>git clone https://github.com/twentyone-cz/phone21 && cd phone21
 mkdir -p data/{smsdata,spool,astlog,ts-state}
 WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d</pre>
-<p>Web rozhraní krabičky pak běží na <code>http://adresa-serveru:8090</code>.</p>
+<p>Ovládání miniserveru pak běží na <code>http://adresa-serveru:8090</code>.</p>
 
 <h2>2. Privátní síť</h2>
 <ol class="steps">
   <li>V <a href="/app">Můj účet</a> se přihlas Lightning peněženkou, zaplať
   předplatné a dej <b>Přidat zařízení</b> — dostaneš jednorázový klíč
   (platí 24 h, zobrazí se jen jednou).</li>
-  <li>Klíč vlož ve web rozhraní krabičky na záložce <b>Síť</b> → Připojit.
-  Za chvíli tam uvidíš adresu krabičky v privátní síti.</li>
+  <li>Klíč vlož v ovládání miniserveru na záložce <b>Síť</b> → Připojit.
+  Za chvíli tam uvidíš adresu miniserveru v privátní síti.</li>
 </ol>
 
 <h2>3. Telefon</h2>
 <ol class="steps">
-  <li>Nainstaluj aplikaci <b>Tailscale</b> (Google Play, nebo přes Obtainium;
-  verzi z F-Droidu ne — má chybu s vlastním serverem). V ní:
-  <i>Settings → Accounts → ⋯ → Use an alternate server</i> → zadej
-  <code>https://cockscale.twentyone.cz</code> → potvrď v prohlížeči
-  peněženkou. Tím je telefon ve tvé privátní síti.</li>
-  <li>Nainstaluj aplikaci <b>Linphone</b> a zadej do ní přihlašovací údaje
-  ze záložky <b>Síť</b> web rozhraní krabičky (uživatel, heslo, adresa
-  serveru, transport UDP).</li>
+  <li>Nainstaluj aplikaci <b>Phone21</b> (odkaz ke stažení najdeš v ovládání
+  miniserveru na záložce <b>Telefon</b>).</li>
+  <li>V ovládání miniserveru si na téže záložce nech zobrazit <b>QR kód</b>
+  a naskenuj ho v aplikaci. Tím se telefon připojí do tvé privátní sítě
+  i k miniserveru — nic dalšího se nevyplňuje.</li>
   <li>Hotovo — voláš a píšeš ze svého čísla odkudkoli. Důležité pro
   Android: nepoužíváme Google push notifikace (žádný Google prostředník
   mezi tebou a tvým telefonem) — aplikace proto musí smět běžet na pozadí.
-  Nastav Linphone i Tailscale v systému na <i>Baterie → Neomezeno</i>,
-  jinak tě hovor nemusí dozvonit.</li>
+  Nastav ji v systému na <i>Baterie → Neomezeno</i>, jinak tě hovor
+  nemusí dozvonit.</li>
 </ol>
 
 <h2>Volitelné: ostrovní režim</h2>
-<p>Krabička umí při výpadku domácího internetu automaticky přejít na mobilní
+<p>Miniserver umí při výpadku domácího internetu automaticky přejít na mobilní
 data z tvé SIM — zůstaneš dosažitelný, dokud jede mobilní síť, a po zotavení
-přípojky se sama vrátí zpět. V Docker variantě se zapíná proměnnými
+přípojky se sám vrátí zpět. V Docker variantě se zapíná proměnnými
 <code>WWAN_FAILOVER=1 WWAN_APN=internet</code> (APN podle tvého tarifu;
-data v ostrovním režimu jdou z balíčku SIM). Do Umbrel appky přibude
-přepínač v rozhraní.</p>
+data v ostrovním režimu jdou z balíčku SIM). V aplikaci pro Umbrel je
+na to přepínač v rozhraní.</p>
 
 <h2>Soukromí</h2>
 <div class="honest">
   <p>Koordinační server privátní sítě nutně vidí veřejné IP adresy tvých
   zařízení (jinak se nenajdou) a čas připojení — nikdy obsah hovorů ani
-  zpráv, ten jde šifrovaně mezi telefonem a krabičkou. A protože nemáme
+  zpráv, ten jde šifrovaně mezi telefonem a miniserverem. A protože nemáme
   žádnou tvoji identitu (žádné jméno, e-mail ani telefonní číslo), samotná
   IP adresa u nás k identifikaci osoby nevede. Po zrušení účtu data mažeme.</p>
-  <p><b>Na co pozor:</b> hovory a SMS jdou z tvé krabičky do běžné mobilní
+  <p><b>Na co pozor:</b> hovory a SMS jdou z tvého miniserveru do běžné mobilní
   sítě přes tvého operátora — úplně stejně, jako bys volal z obyčejného
   telefonu. Operátor je vidí a podléhají zákonnému odposlechu. Tahle služba
-  chrání cestu mezi tebou a tvou krabičkou, ne mobilní síť za ní.</p>
-  <p>Aplikace třetích stran mají vlastní telemetrii: u Tailscale appky
-  doporučujeme zablokovat doménu <code>log.tailscale.io</code> (privátní
-  DNS/blokátor) — krabička má telemetrii vypnutou už z výroby. Všechno je
-  open source — <a href="https://github.com/twentyone-cz/gsm2sip">ověř si nás</a>.</p>
+  chrání cestu mezi tebou a tvým miniserverem, ne mobilní síť za ní.</p>
+  <p>Telemetrii má aplikace i miniserver vypnutou z výroby a nic o tobě
+  neodesílají. Všechno je open source —
+  <a href="https://github.com/twentyone-cz/phone21">ověř si nás</a>.</p>
 </div>
 
 <footer>
-  <a href="/">← zpět na jednadvacet phone</a>
+  <a href="/">← zpět na Phone21</a>
 </footer>
 </main>
 </body>

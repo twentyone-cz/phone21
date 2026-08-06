@@ -86,13 +86,13 @@ class Ami:
         self._read_until(b"\r\n")  # banner
         resp = self.action("Login", Username=AMI_USER, Secret=ami_password())
         if "Success" not in resp.get("Response", ""):
-            raise AmiError("AMI login selhal: %s" % resp.get("Message"))
+            raise AmiError("přihlášení odmítnuto: %s" % resp.get("Message"))
 
     def _read_until(self, marker):
         while marker not in self.buf:
             chunk = self.sock.recv(4096)
             if not chunk:
-                raise AmiError("AMI spojení ukončeno")
+                raise AmiError("spojení ukončeno")
             self.buf += chunk
         data, self.buf = self.buf.split(marker, 1)
         return data
@@ -427,14 +427,14 @@ def render(active, body, extra=""):
         if TS_DIR:
             tabs.append((u("/net"), "net", "Síť", True))
         tabs.append((u("/stav"), "status", "Pokročilé", True))
-        brand = "jednadvacet <b>phone</b>"
+        brand = "<b>Phone21</b>"
     else:
         tabs = [(u("/"), "status", "Stav", True), (u("/sms"), "sms", "SMS", True),
                 (u("/telefon"), "phone", "Telefon", ready)]
         if TS_DIR:
             tabs.append((u("/net"), "net", "Síť", True))
         tabs.append((u("/diag"), "diag", "Diagnostika", True))
-        brand = "<b>GSM2SIP</b>"
+        brand = "<b>Phone21</b>"
     nav = ""
     for href, key, label, enabled in tabs:
         cls = "act" if active == key else ("" if enabled else "off")
@@ -442,8 +442,7 @@ def render(active, body, extra=""):
         nav += '<a href="%s" class="%s"%s>%s</a>' % (href, cls, tip, label)
     out = PAGE
     for key, val in (("{nav}", nav), ("{brand}", brand), ("{body}", body),
-                     ("{extra}", extra), ("{brand_plain}",
-                      "jednadvacet phone" if GUI else "GSM2SIP"),
+                     ("{extra}", extra), ("{brand_plain}", "Phone21"),
                      ("{now}", time.strftime("%d.%m. %H:%M"))):
         out = out.replace(key, val)
     return out
@@ -520,7 +519,7 @@ def page_home(info=""):
     if ip and sec.get("SIP_USER"):
         tiles.append(_tile(
             "\U0001F4F1", "Telefon", "Připraveno", "ok",
-            '<a href="%s">načti QR do Linphonu</a> · '
+            '<a href="%s">načti QR do aplikace Phone21</a> · '
             '<a href="https://phone.twentyone.cz/instalace" target="_blank">'
             "návod</a>" % u("/telefon")))
     else:
@@ -606,7 +605,7 @@ def page_status(mode_info=""):
         "<h1>%s</h1>"
         "<h2>Modem</h2><pre>%s</pre>"
         "<h2>Detail zařízení</h2><pre>%s</pre>"
-        "<h2>SIP registrace softphonu</h2><pre>%s</pre>"
+        "<h2>Připojení telefonu</h2><pre>%s</pre>"
         "<h2>Hovory</h2><pre>%s</pre>"
         "<h2>SMS fronta</h2><p>%s</p>"
         "<h2>Watchdog modemu</h2>%s"
@@ -725,10 +724,10 @@ def page_phone(info=""):
             "k ní telefon zvenku nedovolá. Připoj ji na záložce "
             '<a href="%s">Síť</a> — pak se sem vrať.</p>' % u("/net"))
     blocks.append(
-        "<p>Do telefonu si nainstaluj <b>Linphone</b> a naskenuj kód — "
-        "účet, heslo i adresa brány se nastaví samy:</p>"
+        "<p>Do telefonu si nainstaluj aplikaci <b>Phone21</b> a naskenuj kód — "
+        "účet, heslo i adresa miniserveru se nastaví samy:</p>"
         '<form class="inline" method="post" action="%s">'
-        "<button>Zobrazit QR pro Linphone</button></form>"
+        "<button>Zobrazit QR pro Phone21</button></form>"
         "<p class=\"small muted\">Návod krok za krokem: "
         '<a href="https://phone.twentyone.cz/instalace" target="_blank">'
         "phone.twentyone.cz/instalace</a></p>"
@@ -750,13 +749,13 @@ def page_qr(url):
     otevře appku rovnou — přečte ho i vestavěný skener Linphonu i systémový
     fotoaparát (ověřeno na GrapheneOS i Samsungu)."""
     body = """<h1>Připojení telefonu</h1>
-<p>Nejdřív si v telefonu nainstaluj <b>Linphone</b>. Pak naskenuj kód —
-buď skenerem v Linphone (Přidat účet → <b>Scan QR code</b>), nebo běžným
+<p>Nejdřív si v telefonu nainstaluj aplikaci <b>Phone21</b>. Pak naskenuj kód —
+buď skenerem v aplikaci (Přidat účet → <b>Scan QR code</b>), nebo běžným
 fotoaparátem telefonu; obojí appku nastaví samo.</p>
 <div id="qr" class="qr"></div>
 
 <details><summary>Když skener nespolupracuje</summary>
-<p>V Linphone: <b>Nastavení → Pokročilá nastavení → Remote provisioning
+<p>V aplikaci: <b>Nastavení → Pokročilá nastavení → Remote provisioning
 URL</b> → vlož tenhle odkaz a dej <b>Download &amp; apply</b>:</p>
 <p class="mono" style="font-size:1.15rem;letter-spacing:.02em">%s</p></details>
 
@@ -780,7 +779,7 @@ def page_diag(at_info=""):
         "<button>Poslat</button></form>"
         "<small>Odpověď dorazí asynchronně — objeví se v logu níže "
         "(Got Response). Pozor, některé AT příkazy modem rozbijí.</small>"
-        "<h2>Log Asterisku (tail)</h2><pre>%s</pre>"
+        "<h2>Záznam telefonní části</h2><pre>%s</pre>"
         '<p><button onclick="location.reload()">Obnovit</button></p>'
     ) % (at_info, esc(tail_log())))
 
@@ -802,7 +801,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _deny(self):
         self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="GSM2SIP"')
+        self.send_header("WWW-Authenticate", 'Basic realm="Phone21"')
         self.end_headers()
         self.wfile.write(b"auth required (user libovolny, heslo WEBUI_PASSWORD)")
 
@@ -853,7 +852,7 @@ class Handler(BaseHTTPRequestHandler):
             cli("database put gsm2sip missed_mode " + mode)
             saved = get_missed_mode()
             info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
-                else '<p class="bad">Zápis se nepotvrdil — zkontroluj AMI/AstDB.</p>'
+                else '<p class="bad">Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
             return self._html(page(info))
         if self.path == "/island-mode":
             page = page_home if GUI else page_status
@@ -867,7 +866,7 @@ class Handler(BaseHTTPRequestHandler):
             info = ('<p class="ok">Ostrovní režim: %s.</p>'
                     % ("zapnuto" if saved == "on" else "vypnuto")) \
                 if saved == want else \
-                '<p class="bad">Zápis se nepotvrdil — zkontroluj AMI/AstDB.</p>'
+                '<p class="bad">Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
             return self._html(page(info))
         if self.path == "/sms/send":
             to = "".join(c for c in form.get("to", "") if c in "+0123456789")
@@ -891,7 +890,7 @@ class Handler(BaseHTTPRequestHandler):
                         if ok else '<p class="bad">Odeslání selhalo: %s</p>') \
                     % esc(resp.get("Message", ""))
             except Exception as e:
-                info = '<p class="bad">AMI chyba: %s</p>' % esc(e)
+                info = '<p class="bad">Chyba spojení s telefonní částí: %s</p>' % esc(e)
             return self._html(page_sms(info))
         if self.path == "/telefon/qr":
             ip = ts_ip()
