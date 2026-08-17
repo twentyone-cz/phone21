@@ -563,7 +563,18 @@ def default_route_iface():
 def lan_ip():
     """Adresa miniserveru v domácí síti. QR se stahuje DŘÍV, než je telefon
     v privátní síti, takže musí mířit na adresu, na kterou telefon dosáhne
-    z běžné wifi."""
+    z běžné wifi.
+
+    Přednost má soubor od kontejneru ústředny: ten běží v síti hostitele
+    a vidí skutečná rozhraní. Ovládání je za mostem dockeru, takže samo
+    zjistí jen vnitřní adresu (u umbrelu 10.21.x)."""
+    try:
+        with open(os.path.join(DATA_DIR, "lan_ip")) as f:
+            addr = f.read().strip()
+        if addr and not addr.startswith(("127.", "100.", "10.21.")):
+            return addr
+    except OSError:
+        pass
     iface = default_route_iface()
     if iface and iface != "tailscale0":
         addr = _iface_ipv4(iface)

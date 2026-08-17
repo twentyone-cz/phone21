@@ -199,6 +199,25 @@ island_default() {
 island_default &
 /opt/gsm2sip/scripts/wwan.sh watch &
 
+# Adresa v domácí síti pro QR telefonu. Zapisuje ji tenhle kontejner,
+# protože běží v síti hostitele — webui je za mostem dockeru a viděl by
+# jen jeho vnitřní adresu (10.21.x u umbrelu).
+lan_ip_loop() {
+  local iface addr
+  while true; do
+    iface=$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')
+    if [[ -n "$iface" && "$iface" != "tailscale0" ]]; then
+      addr=$(ip -4 -o addr show dev "$iface" 2>/dev/null \
+             | awk '{split($4,a,"/"); print a[1]; exit}')
+      if [[ -n "$addr" && "$addr" != 100.* && "$addr" != 127.* ]]; then
+        printf '%s' "$addr" > "$DATA/lan_ip.tmp" && mv "$DATA/lan_ip.tmp" "$DATA/lan_ip"
+      fi
+    fi
+    sleep 120
+  done
+}
+lan_ip_loop &
+
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
   while true; do
     asterisk -f -U asterisk
