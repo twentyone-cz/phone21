@@ -183,17 +183,24 @@ def prov_new_token():
         for t, (exp, _used) in list(_prov_tokens.items()):
             if exp < now:
                 del _prov_tokens[t]
-        _prov_tokens[token] = (now + PROV_TTL, False)
+        _prov_tokens[token] = (now + PROV_TTL, 0.0)
     return token
 
 
 def prov_claim(token):
-    """Ověří a spotřebuje token (jedno stažení)."""
+    """Ověří token. Po prvním stažení zůstává platný ještě 90 s — fotoaparáty
+    a prohlížeče si odkaz z QR často „předstáhnou" pro náhled, čímž by čistě
+    jednorázový token spálily dřív, než si konfiguraci vezme aplikace."""
     with _prov_lock:
         entry = _prov_tokens.get(token)
-        if not entry or entry[0] < time.time() or entry[1]:
+        if not entry or entry[0] < time.time():
             return False
-        _prov_tokens[token] = (entry[0], True)
+        expires, first_claim = entry
+        now = time.time()
+        if first_claim and now - first_claim > 90:
+            return False
+        if not first_claim:
+            _prov_tokens[token] = (expires, now)
         return True
 
 
