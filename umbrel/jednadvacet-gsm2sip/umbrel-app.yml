@@ -1,8 +1,9 @@
 manifestVersion: 1
 id: jednadvacet-gsm2sip
 category: networking
+icon: https://phone.twentyone.cz/img/phone21-icon.svg
 name: Phone21
-version: "0.9.17"
+version: "0.9.18"
 tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
   Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
@@ -34,6 +35,6 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Oprava připojení telefonu: QR kód se nově stahuje z domácí sítě, takže
-  ho telefon přečte i dřív, než je v privátní síti (předtím sken končil
-  chybou). Aplikace má stejnou ikonu jako telefon.
+  Oprava připojení telefonu: QR kód nese adresu miniserveru v domácí síti
+  (dřív ukazoval na vnitřní adresu dockeru, takže telefon konfiguraci
+  nestáhl). Aplikace má vlastní ikonu.

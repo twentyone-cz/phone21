@@ -11,7 +11,9 @@ import html
 import json
 import os
 import re
+import fcntl
 import socket
+import struct
 import threading
 import time
 import urllib.error
@@ -530,19 +532,51 @@ def ts_ip():
         return ""
 
 
-def lan_ip():
-    """Adresa miniserveru v domácí síti. QR se stahuje PŘED tím, než je
-    telefon v privátní síti, takže na tailnet adresu nedosáhne — leda by
-    už připojený byl."""
+def _iface_ipv4(name):
+    """IPv4 adresa rozhraní (SIOCGIFADDR) — bez cizích knihoven."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.connect(("1.1.1.1", 80))       # nic se neposílá, jen se vybere trasa
-        addr = sock.getsockname()[0]
-        return "" if addr.startswith(("127.", "100.")) else addr
+        packed = fcntl.ioctl(sock.fileno(), 0x8915,
+                             struct.pack("256s", name[:15].encode()))
+        return socket.inet_ntoa(packed[20:24])
     except OSError:
         return ""
     finally:
         sock.close()
+
+
+def default_route_iface():
+    """Rozhraní s výchozí trasou z /proc/net/route. Trik s UDP spojením
+    vracel adresu můstku dockeru (u umbrelu 10.21.x), což telefon v domácí
+    síti nenajde."""
+    try:
+        with open("/proc/net/route") as f:
+            for line in f.readlines()[1:]:
+                cols = line.split()
+                if len(cols) > 2 and cols[1] == "00000000":
+                    return cols[0]
+    except OSError:
+        pass
+    return ""
+
+
+def lan_ip():
+    """Adresa miniserveru v domácí síti. QR se stahuje DŘÍV, než je telefon
+    v privátní síti, takže musí mířit na adresu, na kterou telefon dosáhne
+    z běžné wifi."""
+    iface = default_route_iface()
+    if iface and iface != "tailscale0":
+        addr = _iface_ipv4(iface)
+        if addr and not addr.startswith(("127.", "100.")):
+            return addr
+    # záloha: projít rozhraní a vzít první běžnou lokální adresu
+    for _idx, name in socket.if_nameindex():
+        if name.startswith(("lo", "docker", "br-", "veth", "tailscale")):
+            continue
+        addr = _iface_ipv4(name)
+        if addr and not addr.startswith(("127.", "100.", "169.254.")):
+            return addr
+    return ""
 
 
 def modem_summary():
