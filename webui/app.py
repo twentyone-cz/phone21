@@ -530,6 +530,21 @@ def ts_ip():
         return ""
 
 
+def lan_ip():
+    """Adresa miniserveru v domácí síti. QR se stahuje PŘED tím, než je
+    telefon v privátní síti, takže na tailnet adresu nedosáhne — leda by
+    už připojený byl."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("1.1.1.1", 80))       # nic se neposílá, jen se vybere trasa
+        addr = sock.getsockname()[0]
+        return "" if addr.startswith(("127.", "100.")) else addr
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+
+
 def modem_summary():
     """Klíčové položky z `quectel show device state` pro dashboard."""
     out = cli("quectel show device state " + DEVICE)
@@ -839,6 +854,9 @@ def page_qr(url):
 <p>Nejdřív si v telefonu nainstaluj aplikaci <b>Phone21</b>. Pak naskenuj kód —
 buď skenerem v aplikaci (Přidat účet → <b>Scan QR code</b>), nebo běžným
 fotoaparátem telefonu; obojí appku nastaví samo.</p>
+<p><b>Telefon musí být na stejné wifi jako miniserver.</b> Konfiguraci si
+stahuje z domácí sítě, protože do privátní sítě se teprve chystá — a kód
+platí 10 minut a jen jednou.</p>
 <div id="qr" class="qr"></div>
 
 <details><summary>Když skener nespolupracuje</summary>
@@ -985,7 +1003,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_phone(
                     '<p class="bad">Nejdřív připoj krabičku do privátní sítě '
                     "(záložka Síť).</p>"))
-            url = "http://%s:%d/p/%s" % (ip, PROV_PORT, prov_new_token())
+            host = lan_ip() or ip
+            url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token())
             return self._html(page_qr(url))
         if self.path == "/net/authkey" and TS_DIR:
             key = form.get("authkey", "").strip()
