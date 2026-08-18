@@ -75,8 +75,18 @@ step "šablony a entrypoint v obraze" \
 step "start kontejneru ústředny" \
   docker run -d --name "$AST" -e GSM2SIP_SELFCONFIG=1 -e TS_WAIT=1 \
     gsm2sip-asterisk:smoke
-step "ústředna plně nabootovala" \
-  timeout 90 docker exec "$AST" asterisk -rx 'core waitfullybooted'
+ast_boot_check() {
+  # CLI socket vzniká až po startu procesu — bez opakování by kontrola
+  # závodila se startem a falešně padala
+  local i
+  for i in $(seq 1 45); do
+    docker exec "$AST" asterisk -rx 'core waitfullybooted' >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  docker logs "$AST" --tail 20
+  return 1
+}
+step "ústředna plně nabootovala" ast_boot_check
 step "CDR adresář existuje (historie hovorů se má kam psát)" \
   docker exec "$AST" test -f /var/log/asterisk/cdr-csv/Master.csv
 ast_dialplan_check() {
