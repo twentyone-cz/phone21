@@ -104,6 +104,18 @@ if [[ "${status}" != "running" ]]; then
   (( DRY )) && echo "stav kontejneru: ${status} — neběží"
   exit 0
 fi
+
+# --- Fyzická přítomnost modemu ----------------------------------------------
+# Bez připojeného modemu (bezmodemový dev, vytažený kabel u zákazníka) hlásí
+# ovladač trvale "Not connected" a restarty kontejneru NIC nespraví — jen by
+# každý cooldown shazovaly registrace a session. Stav se hlásí, nezasahuje se.
+AT_DEV="${AT_DEVICE:-/dev/ttyUSB2}"
+if [[ ! -c "${AT_DEV}" ]]; then
+  echo 0 > "${FAILS_FILE}"
+  note_state nomodem "VAROVÁNÍ: zařízení modemu ${AT_DEV} není připojené — nerestartuji (restart bez modemu nepomůže)"
+  (( DRY )) && echo "modem nepřipojen (${AT_DEV}) — nezasahuji"
+  exit 0
+fi
 rm -f "${LASTSTATE_FILE}" 2>/dev/null
 
 # --- Stav zařízení -----------------------------------------------------------
