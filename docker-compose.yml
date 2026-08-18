@@ -5,6 +5,12 @@
 #
 # Známé omezení: Docker rozbalí symlink zařízení jen při vytvoření kontejneru.
 # Po odpojení/zapojení modemu je potřeba kontejner restartovat.
+#
+# Zařízení modemu jdou dovnitř bind mountem + device_cgroup_rules, ne přes
+# `devices:` — na LXC bez udev nejsou /dev/serial/by-id symlinky a `devices:`
+# s neexistujícím (nebo placeholder) souborem zabrání už VYTVOŘENÍ kontejneru.
+# Bind mount projde vždy: bez modemu kontejner nastartuje v bezmodemovém
+# režimu (ovladač jen opakuje open — pro smoke testy webui/dialplanu stačí).
 
 services:
   asterisk:
@@ -23,15 +29,18 @@ services:
       TZ: Europe/Prague       # jinak kontejner loguje v UTC (2h posun proti realitě)
     group_add:
       - "20"                    # dialout (root:dialout 0660 na ttyUSB) — Asterisk neběží jako root
-    devices:
-      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if02-port0:/dev/ttyUSB2"
-      - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0:/dev/ttyUSB4"
+    device_cgroup_rules:
+      - "c 188:* rwm"             # usb-serial (ttyUSB*)
+      - "c 180:* rwm"             # cdc-wdm (QMI)
     volumes:
       - ${ASTERISK_CONF_DIR:-./runtime/asterisk}:/etc/asterisk
       - ./scripts:/usr/local/gsm2sip:ro          # sms-queue.sh (žurnál+retry)
       - ./runtime/smsdata:/var/lib/gsm2sip       # žurnál, fronta, smsdb (persistentní)
       - ./runtime/spool:/var/spool/asterisk/outgoing  # naplánované retry (call files)
       - ./runtime/astlog:/var/log/asterisk       # messages.log pro web UI
+      - /dev/ttyUSB2:/dev/ttyUSB2                # AT port modemu
+      - /dev/ttyUSB4:/dev/ttyUSB4                # audio port modemu
+      - /dev/cdc-wdm0:/dev/cdc-wdm0              # QMI (VoLTE MBN profil)
 
   webui:
     build: ./webui
@@ -50,4 +59,7 @@ services:
       COUNTRY_CODE: ${COUNTRY_CODE:-420}  # normalizace čísel na E.164 (viz dialplan)
     volumes:
       - ./runtime/smsdata:/var/lib/gsm2sip:ro
+      # stav ovládání (tajemství 2FA, token brány) — jediné místo, kam webui
+      # zapisuje; zbytek dat je pro něj jen ke čtení
+      - ./runtime/smsdata/webui:/var/lib/gsm2sip/webui:rw
       - ./runtime/astlog:/var/log/asterisk:ro

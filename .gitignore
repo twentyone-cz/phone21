@@ -19,3 +19,6 @@ android/dialer/local.properties
 
 # Interní: plán přejmenování identifikátorů (obsahuje detaily nasazení)
 docs/prejmenovani-identifikatoru.md
+
+# Interní: vydávací proces (odkazuje na interní infrastrukturu)
+docs/release.md

@@ -33,6 +33,7 @@ define TUN_IFS    = { "tailscale0" }
 define SIP_PORT   = 5060           # pjsip.conf: transport-tcp bind 0.0.0.0:5060
 define RTP_PORTS  = 10000-10100    # rtp.conf: rtpstart/rtpend
 define WEBUI_PORT = 8090           # .env WEBUI_PORT
+define PROV_PORT  = 8091           # provisioning telefonu (jednorázový token)
 
 # Idempotence: tabulku nejdřív (případně) vyrob prázdnou, smaž a nadefinuj.
 # Bez toho by opakované načtení pravidla přidávalo, ne nahrazovalo.
@@ -69,6 +70,11 @@ table inet gsm2sip {
 
     ip saddr $MGMT_NET tcp dport $WEBUI_PORT accept
     iifname $TUN_IFS tcp dport $WEBUI_PORT accept
+
+    # Provisioning telefonu: QR se stahuje z DOMÁCÍ sítě (telefon v privátní
+    # síti ještě není — právě se do ní chystá), takže jen z LAN. Chrání ho
+    # jednorázový token s krátkou platností.
+    ip saddr $MGMT_NET tcp dport $PROV_PORT accept
 
     # --- Telefonie: výhradně z tunelu ------------------------------------
     # Tohle je hlavní důvod, proč WireGuard končí až tady v LXC a ne na

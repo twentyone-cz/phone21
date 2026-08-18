@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.11
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.22
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -55,16 +55,15 @@ services:
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
-    # 8091 = provisioning softphonu: musí být dosažitelný z telefonu přímo
-    # (Linphone se neumí přihlásit), chrání ho jednorázový token
-    ports:
-      - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.11
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.22
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped
+    # 8091 = provisioning softphonu: musí být dosažitelný z telefonu přímo
+    # (Linphone se neumí přihlásit), chrání ho jednorázový token
     ports:
       - "8090:8090"
+      - "8091:8091"
     environment:
       TZ: ${TZ:-Europe/Prague}
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:?nastav WEBUI_PASSWORD}
@@ -78,6 +77,9 @@ services:
     volumes:
       - ./data/smsdata:/var/lib/gsm2sip:ro
       - ./data/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      # stav ovládání (tajemství 2FA, token brány) — jediné rw místo webui
+      # mimo ts/; zakládá a práva nastavuje entrypoint ústředny
+      - ./data/smsdata/webui:/var/lib/gsm2sip/webui:rw
       - ./data/astlog:/var/log/asterisk:ro
 
   tailnet:

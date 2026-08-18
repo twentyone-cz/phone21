@@ -43,8 +43,14 @@ RUN moddir="$(dirname "$(find /usr/lib -name 'chan_pjsip.so' -path '*asterisk*' 
 # jen v režimu GSM2SIP_SELFCONFIG=1).
 COPY asterisk/ /opt/gsm2sip/templates/
 COPY scripts/mbn-profile.sh scripts/wwan.sh /opt/gsm2sip/scripts/
+# sms-queue.sh MUSÍ být v obraze na cestě, kterou volá dialplan (System()).
+# Na Umbrelu/standalone žádný mount skriptů není — bez téhle vrstvy tam
+# žurnál SMS, retry fronta ani zmeškané hovory nefungují. Dev compose cestu
+# překrývá mountem ./scripts, takže se dál testuje verze z working tree.
+COPY scripts/sms-queue.sh /usr/local/gsm2sip/sms-queue.sh
 COPY docker/entrypoint.sh /opt/gsm2sip/entrypoint.sh
-RUN chmod +x /opt/gsm2sip/entrypoint.sh /opt/gsm2sip/scripts/*.sh
+RUN chmod +x /opt/gsm2sip/entrypoint.sh /opt/gsm2sip/scripts/*.sh \
+      /usr/local/gsm2sip/sms-queue.sh
 
 # Spouštět bez -G (viz initgroups); entrypoint bez env = exec asterisk.
 CMD ["/opt/gsm2sip/entrypoint.sh"]

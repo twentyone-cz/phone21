@@ -35,9 +35,12 @@ case "${1:-}" in
 esac
 
 command -v qmicli >/dev/null || die "chybí qmicli (apt install libqmi-utils)"
-[[ -c /dev/cdc-wdm0 ]] || die "chybí /dev/cdc-wdm0 (passthrough do LXC — viz README Fáze 2)"
+[[ -c /dev/cdc-wdm0 ]] || echo "POZOR: /dev/cdc-wdm0 teď není k dispozici — služba se nainstaluje a počká si (ExecCondition)." >&2
 chmod +x "${REPO}/scripts/mbn-profile.sh"
 
+# ExecCondition: bez QMI zařízení (bezmodemový stroj, odpojený modem) unit
+# skončí jako "skipped" místo "failed" — failed by strašil v monitoringu
+# u stavu, který je na bezmodemovém stroji korektní.
 cat > "${SERVICE}" <<EOF
 [Unit]
 Description=GSM2SIP: MBN carrier profil modemu dle operátora SIM (VoLTE)
@@ -46,6 +49,7 @@ After=network.target
 [Service]
 Type=oneshot
 EnvironmentFile=-${REPO}/.env
+ExecCondition=/usr/bin/test -c /dev/cdc-wdm0
 ExecStart=${REPO}/scripts/mbn-profile.sh auto
 RemainAfterExit=yes
 

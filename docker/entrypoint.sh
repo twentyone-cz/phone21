@@ -78,17 +78,35 @@ render() {
     && mv /tmp/manager.conf.new /etc/asterisk/manager.conf
   mkdir -p "$DATA/queue" "$DATA/ts"
   chown -R asterisk "$DATA" /etc/asterisk 2>/dev/null || true
-  # Web UI běží pod jiným uživatelem než Asterisk (na Umbrelu nobody):
-  # data musí umět přečíst (fronta, žurnál) a do ts/ i zapsat (klíč sítě,
-  # ten si ukládá s právy 600). Tajemství zůstávají jen pro Asterisk.
-  # Obsah zpráv a fronta nesmí být čitelné pro „ostatní" — čte je jen
-  # ústředna (vlastník) a ovládání (skupina nobody). Šifrování na disku
-  # nedává smysl: klíč by ležel hned vedle; skutečná ochrana dat v klidu
-  # je šifrovaný disk hostitele.
-  chmod 0750 "$DATA" "$DATA/queue" 2>/dev/null || true
+  # webui (běží jako nobody) potřebuje SIP i AMI heslo — dáme mu přístup
+  # přes skupinu, ne pro celý svět
+  chgrp 65534 "$SECRETS" 2>/dev/null || true
+  chmod 0640 "$SECRETS" 2>/dev/null || true
+  log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
+}
+
+# Společná příprava dat — běží VŽDY (i v LXC režimu bez selfkonfigurace;
+# dřív žila v render() a na nasazeních bez GSM2SIP_SELFCONFIG se nikdy
+# neprovedla).
+#
+# Web UI běží pod jiným uživatelem než Asterisk (na Umbrelu nobody):
+# data musí umět přečíst (fronta, žurnál) a do ts/ a webui/ i zapsat.
+# Obsah zpráv a fronta nesmí být čitelné pro „ostatní" — čte je jen
+# ústředna (vlastník) a ovládání (skupina nobody). Šifrování na disku
+# nedává smysl: klíč by ležel hned vedle; skutečná ochrana dat v klidu
+# je šifrovaný disk hostitele.
+common_setup() {
+  mkdir -p "$DATA/queue" "$DATA/ts" "$DATA/webui"
+  # setgid (2750/2770): soubory založené ústřednou (žurnál, fronta) dědí
+  # skupinu ovládání — bez toho by každá SMS vytvořila soubor se skupinou
+  # asterisk a ovládání by ho nepřečetlo
   chgrp 65534 "$DATA" "$DATA/queue" 2>/dev/null || true
-  chmod 0770 "$DATA/ts" 2>/dev/null || true
+  chmod 2750 "$DATA" "$DATA/queue" 2>/dev/null || true
   chgrp 65534 "$DATA/ts" 2>/dev/null || true
+  chmod 2770 "$DATA/ts" 2>/dev/null || true
+  # stav ovládání (tajemství 2FA, token brány) — zapisuje ho jen webui
+  chgrp 65534 "$DATA/webui" 2>/dev/null || true
+  chmod 2770 "$DATA/webui" 2>/dev/null || true
   chgrp 65534 "$DATA/journal.jsonl" 2>/dev/null || true
   chmod 0640 "$DATA/journal.jsonl" 2>/dev/null || true
   find "$DATA/queue" -type f -exec chgrp 65534 {} + -exec chmod 0640 {} + 2>/dev/null || true
@@ -97,11 +115,15 @@ render() {
   chown -R asterisk /var/log/asterisk 2>/dev/null || \
     chmod 0777 /var/log/asterisk 2>/dev/null || true
   chmod 0644 /var/log/asterisk/messages.log 2>/dev/null || true
-  # webui (běží jako nobody) potřebuje SIP i AMI heslo — dáme mu přístup
-  # přes skupinu, ne pro celý svět
-  chgrp 65534 "$SECRETS" 2>/dev/null || true
-  chmod 0640 "$SECRETS" 2>/dev/null || true
-  log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
+  # historie hovorů: cdr_csv píše do astlogdir/cdr-csv, ale bind-mount přes
+  # /var/log/asterisk ten adresář z obrazu zakryje — bez založení tady by
+  # se CDR nikdy nezapsalo (a stránka Hovory by tiše zůstala prázdná)
+  mkdir -p /var/log/asterisk/cdr-csv
+  touch /var/log/asterisk/cdr-csv/Master.csv 2>/dev/null || true
+  chown -R asterisk /var/log/asterisk/cdr-csv 2>/dev/null || true
+  chgrp 65534 /var/log/asterisk/cdr-csv /var/log/asterisk/cdr-csv/Master.csv 2>/dev/null || true
+  chmod 0750 /var/log/asterisk/cdr-csv 2>/dev/null || true
+  chmod 0640 /var/log/asterisk/cdr-csv/Master.csv 2>/dev/null || true
 }
 
 watchdog_loop() {
@@ -192,6 +214,7 @@ mbn_loop() {
 if [[ "${GSM2SIP_SELFCONFIG:-0}" == "1" ]]; then
   render
 fi
+common_setup
 [[ "${WATCHDOG_INTERNAL:-0}" == "1" ]] && watchdog_loop &
 [[ "${MBN_INTERNAL:-0}" == "1" ]] && mbn_loop &
 # Ostrovní režim: hlídka běží vždy, ale zasáhne jen když je zapnutý

@@ -30,6 +30,10 @@ WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
 WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "8090"))
 SIP_USER = os.environ.get("SIP_USER", "softphone")
 DATA_DIR = os.environ.get("GSM2SIP_DATA", "/var/lib/gsm2sip")
+# Stav ovládání (tajemství 2FA, token brány). DATA_DIR je pro ovládání
+# READ-ONLY mount — zapisovat jde jedině sem (samostatný rw mount, adresář
+# zakládá entrypoint ústředny). Zápis kamkoli jinam v DATA_DIR selže.
+STATE_DIR = os.environ.get("WEBUI_STATE", os.path.join(DATA_DIR, "webui"))
 LOG_FILE = os.environ.get("ASTERISK_LOG", "/var/log/asterisk/messages.log")
 DEVICE = os.environ.get("QUECTEL_DEVICE", "quectel0")
 COUNTRY_CODE = os.environ.get("COUNTRY_CODE", "420")
@@ -209,7 +213,26 @@ PARTNER_URL = os.environ.get("COCKSCALE_URL", "https://cockscale.twentyone.cz")
 
 
 def partner_token_path():
-    return os.path.join(DATA_DIR, "partner_token")
+    return os.path.join(STATE_DIR, "partner_token")
+
+
+def write_state(path, data):
+    """Atomický zápis stavu (0600, tmp+rename). Volající chytá OSError —
+    na instalaci bez rw mountu STATE_DIR zápis selže a uživatel musí dostat
+    čitelnou chybu, ne přerušené spojení."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def audit(msg):
+    """Bezpečnostní události do stdout (docker logs) — přihlášení, 2FA,
+    AT příkazy. Bez tohohle se po incidentu nedá zrekonstruovat vůbec nic."""
+    print("[audit] %s %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg),
+          flush=True)
 
 
 def read_partner_token():
@@ -221,9 +244,7 @@ def read_partner_token():
 
 
 def save_partner_token(token):
-    fd = os.open(partner_token_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(token)
+    write_state(partner_token_path(), token)
 
 
 PARTNER_ERRORS = {
@@ -628,25 +649,40 @@ def signal_percent(rssi):
 def read_cdr(limit=30):
     """Historie hovorů z CDR (Master.csv). Sloupce podle cdr_csv:
     accountcode,src,dst,dcontext,clid,channel,dstchannel,lastapp,lastdata,
-    start,answer,end,duration,billsec,disposition,amaflags"""
+    start,answer,end,duration,billsec,disposition,amaflags
+
+    Čte se jen KONEC souboru (roste bez rotace — po roce provozu nesmí každé
+    načtení dashboardu polykat celý soubor) a parsuje se po řádcích: jeden
+    vadný bajt nebo useknutý zápis zahodí řádek, ne celou stránku."""
     path = os.path.join(os.path.dirname(LOG_FILE), "cdr-csv", "Master.csv")
     rows = []
     try:
         import csv as _csv
-        with open(path, newline="") as f:
-            for cols in _csv.reader(f):
-                if len(cols) < 15:
-                    continue
-                incoming = cols[5].startswith("Quectel/")
-                rows.append({
-                    "dir": "in" if incoming else "out",
-                    "num": cols[1] if incoming else cols[2],
-                    "start": cols[9],
-                    "billsec": cols[13],
-                    "disposition": cols[14],
-                })
-    except OSError:
-        return []
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 256 * 1024))
+            chunk = f.read().decode("utf-8", errors="replace")
+        lines = chunk.splitlines()
+        if size > 256 * 1024 and lines:
+            lines = lines[1:]  # první řádek výseku může být useknutý
+        for ln in lines:
+            try:
+                cols = next(_csv.reader([ln]))
+            except (StopIteration, _csv.Error):
+                continue
+            if len(cols) < 15:
+                continue
+            incoming = cols[5].startswith("Quectel/")
+            rows.append({
+                "dir": "in" if incoming else "out",
+                "num": cols[1] if incoming else cols[2],
+                "start": cols[9],
+                "billsec": cols[13],
+                "disposition": cols[14],
+            })
+    except Exception:
+        return []  # nečitelná historie nesmí shodit dashboard
     return list(reversed(rows))[:limit]
 
 
@@ -1020,9 +1056,41 @@ _sessions = {}
 _sessions_lock = threading.Lock()
 _totp_pending = {}      # návrh tajemství čekající na potvrzení kódem
 
+# Rate-limit přihlášení: bez něj jde heslo zkoušet neomezenou rychlostí
+# a nikde po tom nezůstane stopa. Okno je krátké a limity mírné — za
+# app_proxy (Umbrel) je vidět jen adresa proxy, takže limit je tam fakticky
+# globální a nesmí legitimního uživatele zamknout na dlouho.
+LOGIN_WINDOW = 60
+LOGIN_MAX_IP = 5
+LOGIN_MAX_GLOBAL = 20
+_login_attempts = {}    # ip -> [časy pokusů v okně]
+_login_lock = threading.Lock()
+
+
+def login_allowed(ip):
+    """Započítá pokus; False = tenhle pokus už se nemá ani vyhodnocovat."""
+    now = time.time()
+    with _login_lock:
+        for k in list(_login_attempts):
+            _login_attempts[k] = [t for t in _login_attempts[k]
+                                  if now - t < LOGIN_WINDOW]
+            if not _login_attempts[k]:
+                del _login_attempts[k]
+        total = sum(len(v) for v in _login_attempts.values())
+        if total >= LOGIN_MAX_GLOBAL \
+                or len(_login_attempts.get(ip, [])) >= LOGIN_MAX_IP:
+            return False
+        _login_attempts.setdefault(ip, []).append(now)
+        return True
+
+
+def login_reset(ip):
+    with _login_lock:
+        _login_attempts.pop(ip, None)
+
 
 def totp_secret_path():
-    return os.path.join(DATA_DIR, "totp_secret")
+    return os.path.join(STATE_DIR, "totp_secret")
 
 
 def totp_enabled():
@@ -1214,14 +1282,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/login":
+            ip = self.client_address[0]
+            if not login_allowed(ip):
+                audit("login LIMIT ip=%s" % ip)
+                return self._html(page_login(
+                    "[OVL-E22] Moc pokusů po sobě — počkej minutu a zkus to "
+                    "znovu."), 429)
             form = self._form()
-            if form.get("password", "") != WEBUI_PASSWORD:
+            if not hmac.compare_digest(form.get("password", "").encode(),
+                                       WEBUI_PASSWORD.encode()):
+                audit("login FAIL ip=%s" % ip)
                 return self._html(page_login("[OVL-E01] Heslo nesedí."))
             if totp_enabled():
-                secret = open(totp_secret_path()).read().strip()
+                try:
+                    secret = open(totp_secret_path()).read().strip()
+                except OSError as e:
+                    audit("login 2FA-READ-ERROR ip=%s err=%s" % (ip, e))
+                    return self._html(page_login(
+                        "[OVL-E21] Nejde přečíst nastavení dvoufázového "
+                        "ověření — zkus to za chvíli, případně restartuj "
+                        "aplikaci."))
                 if not totp_verify(secret, form.get("totp", "")):
+                    audit("login TOTP-FAIL ip=%s" % ip)
                     return self._html(page_login(
                         "[OVL-E02] Jednorázový kód nesedí (nebo vypršel)."))
+            audit("login OK ip=%s" % ip)
+            login_reset(ip)
             token = session_new()
             data = b""
             self.send_response(303)
@@ -1246,10 +1332,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_2fa(
                     '<p class="bad">[OVL-E03] Kód nesedí — zkus to znovu, '
                     "kódy platí 30 sekund.</p>"))
-            fd = os.open(totp_secret_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as f:
-                f.write(secret)
+            try:
+                write_state(totp_secret_path(), secret)
+            except OSError as e:
+                audit("2fa ENABLE-WRITE-ERROR err=%s" % e)
+                return self._html(page_2fa(
+                    '<p class="bad">[OVL-E19] Nastavení teď nejde uložit '
+                    "(%s). Zkus to po restartu aplikace; kdyby to trvalo, "
+                    "nahlas to i s tímhle kódem.</p>" % esc(e)))
             _totp_pending.clear()
+            audit("2fa ENABLED")
             return self._html(page_2fa('<p class="ok">Dvoufázové ověření zapnuto.</p>'))
         if self.path == "/2fa/off":
             secret = ""
@@ -1261,7 +1353,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_2fa(
                     '<p class="bad">[OVL-E04] Kód nesedí — vypnutí chce '
                     "platný kód.</p>"))
-            os.unlink(totp_secret_path())
+            try:
+                os.unlink(totp_secret_path())
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                audit("2fa DISABLE-WRITE-ERROR err=%s" % e)
+                return self._html(page_2fa(
+                    '<p class="bad">[OVL-E20] Vypnutí teď nejde uložit '
+                    "(%s). Zkus to po restartu aplikace.</p>" % esc(e)))
+            audit("2fa DISABLED")
             return self._html(page_2fa('<p class="ok">Dvoufázové ověření vypnuto.</p>'))
         if self.path == "/missed-mode":
             page = page_home if GUI else page_status
@@ -1351,8 +1452,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_net(info))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
-            if not cmd.upper().startswith("AT") or "CUSBPIDSWITCH" in cmd.upper():
-                return self._html(page_diag('<p class="bad">[OVL-E15] Povolené jsou jen AT příkazy (a CUSBPIDSWITCH nikdy).</p>'))
+            # Řídicí znaky (CR/LF) by z jednoho AT příkazu udělaly injekci
+            # dalších AMI akcí — příkaz jde přes AMI Command jako text.
+            if (not cmd.upper().startswith("AT")
+                    or "CUSBPIDSWITCH" in cmd.upper()
+                    or len(cmd) > 128
+                    or any(ord(c) < 32 or ord(c) == 127 for c in cmd)):
+                return self._html(page_diag('<p class="bad">[OVL-E15] Povolené jsou jen AT příkazy (max 128 znaků, bez řídicích znaků; CUSBPIDSWITCH nikdy).</p>'))
+            audit("diag/at ip=%s cmd=%r" % (self.client_address[0], cmd))
             out = cli("quectel cmd %s %s" % (DEVICE, cmd))
             return self._html(page_diag('<p class="ok">%s</p>' % esc(out)))
         self._html("<p>404</p>", 404)

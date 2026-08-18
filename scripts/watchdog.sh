@@ -18,8 +18,13 @@
 #    watchdog restartoval bránu donekonečna.
 #  - Mezi restarty COOLDOWN. Když je modem fyzicky pryč (odpojený kabel),
 #    žádný restart nepomůže a nemá cenu bránu mlátit každou půlminutu.
-#  - Zastavený kontejner se NErestartuje. `docker stop` je vědomý úkon
-#    (údržba, ladění) a watchdog do něj nemá co mluvit.
+#  - Zastavený kontejner (exited) se NErestartuje. `docker stop` je vědomý
+#    úkon (údržba, ladění) a watchdog do něj nemá co mluvit — ale ticho taky
+#    ne: jednou za čas to zapíše do logu, ať je stav vidět ve web UI.
+#  - Kontejner ve stavu `created` se nikdy nespustil (typicky chybějící
+#    zařízení modemu při compose up) — restart policy dockeru na něj NESAHÁ,
+#    takže bez zásahu by stál navěky. Watchdog ho zkusí nastartovat
+#    (s cooldownem) a hlásí to jako ALARM.
 
 set -uo pipefail
 
@@ -54,11 +59,52 @@ read_num() { local f="$1"; [[ -r "$f" ]] && cat "$f" 2>/dev/null || echo 0; }
 fails=$(read_num "${FAILS_FILE}")
 
 # --- Je vůbec co hlídat? -----------------------------------------------------
-running=$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null || echo false)
-if [[ "${running}" != "true" ]]; then
+# Neběžící kontejner nesmí projít mlčky: `created` = nikdy nenastartoval
+# (zkusíme docker start), `exited` = vědomé zastavení (jen hlásíme). Aby log
+# nezaplavilo 2880 řádků denně, píše se změna stavu a pak připomínka po 30 min.
+LASTSTATE_FILE=/run/gsm2sip-watchdog.laststate
+note_state() { # $1 stav, $2 zpráva
+  local last="" last_t=0 now
+  now=$(date +%s)
+  [[ -r "${LASTSTATE_FILE}" ]] && read -r last last_t < "${LASTSTATE_FILE}" 2>/dev/null
+  if [[ "${last}" != "$1" ]] || (( now - ${last_t:-0} >= 1800 )); then
+    log "$2"
+    echo "$1 ${now}" > "${LASTSTATE_FILE}"
+  fi
+}
+
+status=$(docker inspect -f '{{.State.Status}}' "${CONTAINER}" 2>/dev/null || echo missing)
+if [[ "${status}" != "running" ]]; then
   echo 0 > "${FAILS_FILE}"
+  case "${status}" in
+    created)
+      note_state created "ALARM: kontejner ${CONTAINER} se nikdy nespustil (stav created — nejspíš chybí zařízení modemu); zkouším docker start"
+      if (( ! DRY )); then
+        now=$(date +%s); last=$(read_num "${LAST_RESTART_FILE}")
+        if (( last == 0 || now - last >= COOLDOWN )); then
+          if docker start "${CONTAINER}" >/dev/null 2>&1; then
+            echo "${now}" > "${LAST_RESTART_FILE}"
+            log "ZÁSAH: docker start ${CONTAINER} proveden"
+          else
+            log "ZÁSAH SELHAL: docker start ${CONTAINER} skončil chybou (zkontroluj zařízení modemu a compose)"
+          fi
+        fi
+      fi
+      ;;
+    exited)
+      note_state exited "VAROVÁNÍ: kontejner ${CONTAINER} je zastavený (exited) — vědomé zastavení respektuji, telefonie neběží"
+      ;;
+    missing)
+      note_state missing "VAROVÁNÍ: kontejner ${CONTAINER} neexistuje — brána není nasazená?"
+      ;;
+    *)
+      note_state "${status}" "VAROVÁNÍ: kontejner ${CONTAINER} je ve stavu ${status}"
+      ;;
+  esac
+  (( DRY )) && echo "stav kontejneru: ${status} — neběží"
   exit 0
 fi
+rm -f "${LASTSTATE_FILE}" 2>/dev/null
 
 # --- Stav zařízení -----------------------------------------------------------
 # `quectel show device state` je spolehlivější než `show devices`: stav je tam

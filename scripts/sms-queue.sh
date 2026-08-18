@@ -25,15 +25,21 @@ TTL=172800        # 48 h
 MAXDELAY=600      # strop backoffu: 10 min
 
 mkdir -p "$QDIR" 2>/dev/null || true
-# webui běží pod jiným uživatelem a jen čte — fronta i žurnál musí být
-# čitelné, jinak se stránka SMS rozbije
-chmod 0755 "$DATA" "$QDIR" 2>/dev/null || true
+# webui (jiný uživatel, jen čte) se k datům dostane přes SKUPINU 65534 —
+# adresáře mají setgid (2750, nastavuje entrypoint), takže nové soubory
+# skupinu dědí a stačí jim group-read. POZOR: chmod adresářů smí jen root —
+# chmod ne-root vlastníkem, který není ve skupině 65534, setgid bit MAŽE
+# (ověřeno) a tím rozbije dědění skupiny pro všechny další soubory.
+if [ "$(id -u)" = "0" ]; then
+  chgrp 65534 "$DATA" "$QDIR" 2>/dev/null || true
+  chmod 2750 "$DATA" "$QDIR" 2>/dev/null || true
+fi
 
 now_iso() { date -Is; }
 
 journal() { # $1 status, $2 b64
   printf '{"t":"%s","status":"%s","sms_b64":"%s"}\n' "$(now_iso)" "$1" "$2" >> "$JOURNAL"
-  chmod 0644 "$JOURNAL" 2>/dev/null || true
+  chmod 0640 "$JOURNAL" 2>/dev/null || true
 }
 
 case "${1:-}" in
@@ -51,7 +57,7 @@ case "${1:-}" in
     fi
     qid="$(date +%s%N)"
     printf '%s' "$b64" > "$QDIR/$qid.b64"
-    chmod 0644 "$QDIR/$qid.b64" 2>/dev/null || true
+    chmod 0640 "$QDIR/$qid.b64" 2>/dev/null || true
     shift_n=$n; [ "$shift_n" -gt 10 ] && shift_n=10
     delay=$(( 60 * (1 << shift_n) ))
     [ "$delay" -gt "$MAXDELAY" ] && delay=$MAXDELAY
