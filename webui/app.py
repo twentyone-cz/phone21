@@ -12,6 +12,7 @@ import json
 import os
 import re
 import fcntl
+import hmac
 import socket
 import struct
 import threading
@@ -492,7 +493,7 @@ footer { text-align:center; color:var(--muted); font-size:.8rem; padding:1.5rem 
 </style></head><body>
 <nav><span class="brand">{brand}</span>{nav}</nav>
 <main>{body}</main>
-<footer>jen LAN / privátní síť · {now}</footer>
+<footer>jen LAN / privátní síť · {now} · obrazovka {screen} · <a href="{twofa}">dvoufázové ověření</a> · <a href="{logout}">odhlásit</a></footer>
 {extra}</body></html>"""
 PAGE = PAGE.replace("ACCENT_COLOR", ACCENT)
 
@@ -523,6 +524,9 @@ def render(active, body, extra=""):
     out = PAGE
     for key, val in (("{nav}", nav), ("{brand}", brand), ("{body}", body),
                      ("{extra}", extra), ("{brand_plain}", "Phone21"),
+                     ("{screen}", "OVL-" + active.upper()),
+                     ("{logout}", u("/logout")),
+                     ("{twofa}", u("/2fa")),
                      ("{now}", time.strftime("%d.%m. %H:%M"))):
         out = out.replace(key, val)
     return out
@@ -610,6 +614,62 @@ def modem_summary():
     return d
 
 
+def signal_percent(rssi):
+    """RSSI z modemu je 0–31 (99 = neznámý) — pro lidi převedeno na procenta."""
+    try:
+        value = int(str(rssi).split()[0])
+    except (TypeError, ValueError):
+        return "?"
+    if not 0 <= value <= 31:
+        return "?"
+    return "%d %%" % round(value / 31 * 100)
+
+
+def read_cdr(limit=30):
+    """Historie hovorů z CDR (Master.csv). Sloupce podle cdr_csv:
+    accountcode,src,dst,dcontext,clid,channel,dstchannel,lastapp,lastdata,
+    start,answer,end,duration,billsec,disposition,amaflags"""
+    path = os.path.join(os.path.dirname(LOG_FILE), "cdr-csv", "Master.csv")
+    rows = []
+    try:
+        import csv as _csv
+        with open(path, newline="") as f:
+            for cols in _csv.reader(f):
+                if len(cols) < 15:
+                    continue
+                incoming = cols[5].startswith("Quectel/")
+                rows.append({
+                    "dir": "in" if incoming else "out",
+                    "num": cols[1] if incoming else cols[2],
+                    "start": cols[9],
+                    "billsec": cols[13],
+                    "disposition": cols[14],
+                })
+    except OSError:
+        return []
+    return list(reversed(rows))[:limit]
+
+
+def _fmt_call(c):
+    arrow = "\u2199" if c["dir"] == "in" else "\u2197"
+    state = {"ANSWERED": "%s s" % c["billsec"], "NO ANSWER": "nezvednuto",
+             "BUSY": "obsazeno", "FAILED": "nespojeno"}.get(
+        c["disposition"], c["disposition"].lower())
+    return "%s %s · %s · %s" % (arrow, esc(c["num"] or "?"), state,
+                                esc(c["start"][5:16]))
+
+
+def page_calls():
+    rows = read_cdr(limit=50)
+    if rows:
+        items = "".join("<li class=\"mono\">%s</li>" % _fmt_call(c) for c in rows)
+        body = "<h1>Hovory</h1><ul class=\"plain\">%s</ul>" % items
+    else:
+        body = ("<h1>Hovory</h1><p class=\"muted\">Zatím žádné hovory "
+                "(historie se začíná psát od této verze).</p>")
+    return render("hovory", body)
+
+
 def _tile(icon, title, value, cls, note):
     return ('<div class="tile"><h3>%s %s</h3><div class="big %s">%s</div>'
             "<small>%s</small></div>") % (icon, title, cls, value, note)
@@ -632,7 +692,7 @@ def page_home(info=""):
                                        esc(m.get("Access technology", "?")),
                                        " + VoLTE" if volte_state() == "registered"
                                        else "",
-                                       esc(m.get("RSSI", "?")))))
+                                       esc(signal_percent(m.get("RSSI"))))))
     elif m and m.get("State"):
         tiles.append(_tile(
             "\U0001F4F6", "Mobilní síť", esc(m.get("State")), "warn",
@@ -666,11 +726,22 @@ def page_home(info=""):
             "nejdřív připoj krabičku do privátní sítě"))
     rows = read_journal(limit=5)
     last = rows[0] if rows else None
+    waiting = len(read_queue())
     tiles.append(_tile(
-        "\U0001F4AC", "Poslední zpráva",
-        esc(last["from"]) if last else "—", "",
-        "%s · <a href=\"%s\">všechny zprávy</a>"
-        % (esc(last["msg"][:60]) if last else "zatím žádné", u("/sms"))))
+        "\U0001F4AC", "Zprávy",
+        esc(last["from"]) if last else "—",
+        "warn" if waiting else "",
+        "%s%s · <a href=\"%s\">všechny zprávy</a>"
+        % (esc(last["msg"][:60]) if last else "zatím žádné",
+           " · <b>čeká na doručení: %d</b>" % waiting if waiting else "",
+           u("/sms"))))
+
+    calls = read_cdr(limit=1)
+    tiles.append(_tile(
+        "\U0001F4DE", "Hovory",
+        _fmt_call(calls[0]) if calls else "—", "",
+        ("poslední hovor · " if calls else "zatím žádné · ")
+        + '<a href="%s">historie</a>' % u("/hovory")))
 
     mode = get_missed_mode()
     missed = (
@@ -869,7 +940,7 @@ def page_phone(info=""):
     ip = ts_ip()
     blocks = [info, "<h1>Telefon</h1>"]
     if not sec.get("SIP_USER"):
-        blocks.append('<p class="bad">Nejde přečíst přihlašovací údaje '
+        blocks.append('<p class="bad">[OVL-E05] Nejde přečíst přihlašovací údaje '
                       "brány — zkus restartovat aplikaci.</p>")
         return render("phone", "".join(blocks))
     if not ip:
@@ -941,26 +1012,164 @@ def page_diag(at_info=""):
     ) % (at_info, esc(tail_log())))
 
 
+# --- přihlášení: formulář + session (Basic auth dialog neuměl spolupracovat
+# se správci hesel) a volitelné dvoufázové ověření (TOTP) -----------------------
+
+SESSION_TTL = 12 * 3600
+_sessions = {}
+_sessions_lock = threading.Lock()
+_totp_pending = {}      # návrh tajemství čekající na potvrzení kódem
+
+
+def totp_secret_path():
+    return os.path.join(DATA_DIR, "totp_secret")
+
+
+def totp_enabled():
+    return os.path.isfile(totp_secret_path())
+
+
+def _b32decode(text):
+    pad = "=" * (-len(text) % 8)
+    return base64.b32decode(text.upper() + pad)
+
+
+def totp_code(secret_b32, when=None, step=30, digits=6):
+    import hmac as _hmac
+    import struct as _struct
+    counter = int((when if when is not None else time.time()) // step)
+    mac = _hmac.new(_b32decode(secret_b32),
+                    _struct.pack(">Q", counter), "sha1").digest()
+    offset = mac[-1] & 0x0F
+    value = (int.from_bytes(mac[offset:offset + 4], "big") & 0x7FFFFFFF)
+    return str(value % (10 ** digits)).zfill(digits)
+
+
+def totp_verify(secret_b32, code):
+    code = (code or "").strip().replace(" ", "")
+    now = time.time()
+    return any(hmac.compare_digest(totp_code(secret_b32, now + drift), code)
+               for drift in (-30, 0, 30))
+
+
+def session_new():
+    token = base64.urlsafe_b64encode(os.urandom(24)).decode().rstrip("=")
+    with _sessions_lock:
+        now = time.time()
+        for old, exp in list(_sessions.items()):
+            if exp < now:
+                del _sessions[old]
+        _sessions[token] = now + SESSION_TTL
+    return token
+
+
+def session_valid(token):
+    with _sessions_lock:
+        exp = _sessions.get(token or "")
+        if not exp:
+            return False
+        if exp < time.time():
+            del _sessions[token]
+            return False
+        return True
+
+
+def session_drop(token):
+    with _sessions_lock:
+        _sessions.pop(token or "", None)
+
+
+def page_login(msg=""):
+    banner = '<p class="bad">%s</p>' % esc(msg) if msg else ""
+    totp_field = ("<label>Kód z ověřovací aplikace</label>"
+                  '<input type="text" name="totp" inputmode="numeric"'
+                  ' autocomplete="one-time-code" placeholder="123 456">'
+                  ) if totp_enabled() else ""
+    return """<!doctype html><html lang="cs"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Přihlášení — Phone21</title><style>
+body { margin:0; font-family:system-ui,sans-serif; background:#f7f4ee;
+  color:#1a1714; display:grid; place-items:center; min-height:100vh; }
+@media (prefers-color-scheme: dark) { body { background:#0b0b0e; color:#f2f2f3; } }
+main { width:min(24rem, 92vw); }
+h1 { color:#f7931a; }
+label { display:block; margin:.9rem 0 .3rem; font-size:.9rem; opacity:.75; }
+input { width:100%%; padding:.6rem .7rem; font-size:1rem; border:1px solid
+  #8884; border-radius:8px; background:transparent; color:inherit; }
+button { margin-top:1.1rem; padding:.65rem 1.4rem; font-size:1rem;
+  border:0; border-radius:8px; background:#f7931a; color:#111; font-weight:700; }
+.bad { color:#e03131; }
+.muted { opacity:.55; font-size:.8rem; }
+</style></head><body><main>
+<h1>Phone21</h1>%s
+<form method="post" action="%s">
+<label>Uživatel</label>
+<input type="text" name="user" value="admin" readonly autocomplete="username">
+<label>Heslo</label>
+<input type="password" name="password" autocomplete="current-password" autofocus>
+%s
+<p><button type="submit">Přihlásit</button></p>
+</form>
+<p class="muted">obrazovka OVL-LOGIN</p>
+</main></body></html>""" % (banner, u("/login"), totp_field)
+
+
+def page_2fa(info=""):
+    body = [info, "<h1>Dvoufázové ověření</h1>"]
+    if totp_enabled():
+        body.append(
+            '<p><span class="ok">Zapnuto.</span> Přihlášení chce heslo '
+            "i kód z ověřovací aplikace.</p>"
+            '<form method="post" action="%s">'
+            "<label>Kód z aplikace (potvrzení vypnutí)</label>"
+            '<input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code">'
+            '<p><button class="danger">Vypnout</button></p></form>' % u("/2fa/off"))
+    elif "pending" in _totp_pending:
+        secret = _totp_pending["pending"]
+        uri = ("otpauth://totp/Phone21:minserver?secret=%s&issuer=Phone21"
+               % secret)
+        body.append(
+            "<p>Naskenuj kód ověřovací aplikací (Aegis, Bitwarden, "
+            "Google Authenticator…) a potvrď kódem:</p>"
+            '<div id="qr" class="qr"></div>'
+            '<p class="small mono">%s</p>'
+            '<form method="post" action="%s">'
+            '<input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code"'
+            ' placeholder="123 456">'
+            "<p><button>Potvrdit a zapnout</button></p></form>"
+            '<script src="%s"></script>'
+            "<script>new QRCode(document.getElementById('qr'), "
+            "{text: %s, width: 220, height: 220});</script>"
+            % (esc(secret), u("/2fa/confirm"), u("/static/qrcode.min.js"),
+               json.dumps(uri)))
+    else:
+        body.append(
+            "<p>Přihlášení bude chtít vedle hesla i jednorázový kód "
+            "z ověřovací aplikace v telefonu.</p>"
+            '<form method="post" action="%s">'
+            "<p><button>Zapnout dvoufázové ověření</button></p></form>"
+            % u("/2fa/setup"))
+    return render("2fa", "".join(body))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "gsm2sip-webui"
+
+    def _session_token(self):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "p21_session":
+                return value
+        return ""
 
     def _authed(self):
         if not WEBUI_PASSWORD:
             return False  # bez hesla neběžíme
-        hdr = self.headers.get("Authorization", "")
-        if hdr.startswith("Basic "):
-            try:
-                _, pwd = base64.b64decode(hdr[6:]).decode().split(":", 1)
-                return pwd == WEBUI_PASSWORD
-            except Exception:
-                return False
-        return False
+        return session_valid(self._session_token())
 
     def _deny(self):
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="Phone21"')
-        self.end_headers()
-        self.wfile.write(b"auth required (user libovolny, heslo WEBUI_PASSWORD)")
+        self._html(page_login())
 
     def _html(self, body, code=200):
         data = body.encode()
@@ -976,8 +1185,19 @@ class Handler(BaseHTTPRequestHandler):
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
 
     def do_GET(self):
+        if self.path == "/login":
+            return self._html(page_login())
+        if self.path == "/logout":
+            session_drop(self._session_token())
+            return self._html(page_login("Odhlášeno."))
+        if self.path.startswith("/static/"):
+            return self.get_static(self.path)
         if not self._authed():
             return self._deny()
+        if self.path == "/2fa":
+            return self._html(page_2fa())
+        if self.path == "/hovory":
+            return self._html(page_calls())
         if self.path == "/":
             return self._html(page_home() if GUI else page_status())
         if self.path == "/stav":
@@ -988,34 +1208,79 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_phone())
         if self.path == "/net" and TS_DIR:
             return self._html(page_net())
-        if self.path.startswith("/static/"):
-            return self.get_static(self.path)
         if self.path == "/diag":
             return self._html(page_diag())
         self._html("<p>404</p>", 404)
 
     def do_POST(self):
+        if self.path == "/login":
+            form = self._form()
+            if form.get("password", "") != WEBUI_PASSWORD:
+                return self._html(page_login("[OVL-E01] Heslo nesedí."))
+            if totp_enabled():
+                secret = open(totp_secret_path()).read().strip()
+                if not totp_verify(secret, form.get("totp", "")):
+                    return self._html(page_login(
+                        "[OVL-E02] Jednorázový kód nesedí (nebo vypršel)."))
+            token = session_new()
+            data = b""
+            self.send_response(303)
+            self.send_header("Location", u("/"))
+            self.send_header(
+                "Set-Cookie",
+                "p21_session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d"
+                % (token, SESSION_TTL))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if not self._authed():
             return self._deny()
         form = self._form()
+        if self.path == "/2fa/setup":
+            secret = base64.b32encode(os.urandom(20)).decode().rstrip("=")
+            _totp_pending["pending"] = secret
+            return self._html(page_2fa())
+        if self.path == "/2fa/confirm":
+            secret = _totp_pending.get("pending", "")
+            if not secret or not totp_verify(secret, form.get("totp", "")):
+                return self._html(page_2fa(
+                    '<p class="bad">[OVL-E03] Kód nesedí — zkus to znovu, '
+                    "kódy platí 30 sekund.</p>"))
+            fd = os.open(totp_secret_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(secret)
+            _totp_pending.clear()
+            return self._html(page_2fa('<p class="ok">Dvoufázové ověření zapnuto.</p>'))
+        if self.path == "/2fa/off":
+            secret = ""
+            try:
+                secret = open(totp_secret_path()).read().strip()
+            except OSError:
+                pass
+            if not secret or not totp_verify(secret, form.get("totp", "")):
+                return self._html(page_2fa(
+                    '<p class="bad">[OVL-E04] Kód nesedí — vypnutí chce '
+                    "platný kód.</p>"))
+            os.unlink(totp_secret_path())
+            return self._html(page_2fa('<p class="ok">Dvoufázové ověření vypnuto.</p>'))
         if self.path == "/missed-mode":
             page = page_home if GUI else page_status
             mode = form.get("mode", "")
             if mode not in MISSED_MODES:
-                return self._html(page('<p class="bad">Neplatný režim.</p>'))
+                return self._html(page('<p class="bad">[OVL-E06] Neplatný režim.</p>'))
             # Enum konstanta, žádný user input do CLI. Dialplan čte
             # ${DB(gsm2sip/missed_mode)} — AstDB leží na persistentním volume
             # (astdbdir v asterisk.conf), takže volba přežije i recreate.
             cli("database put gsm2sip missed_mode " + mode)
             saved = get_missed_mode()
             info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
-                else '<p class="bad">Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
+                else '<p class="bad">[OVL-E16] Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
             return self._html(page(info))
         if self.path == "/island-mode":
             page = page_home if GUI else page_status
             want = form.get("island", "")
             if want not in ("on", "off"):
-                return self._html(page('<p class="bad">Neplatná volba.</p>'))
+                return self._html(page('<p class="bad">[OVL-E07] Neplatná volba.</p>'))
             # Smyčka wwan.sh watch se na tenhle klíč ptá před každým cyklem,
             # takže přepnutí se projeví do jednoho intervalu bez restartu.
             cli("database put gsm2sip island_mode " + want)
@@ -1023,14 +1288,14 @@ class Handler(BaseHTTPRequestHandler):
             info = ('<p class="ok">Ostrovní režim: %s.</p>'
                     % ("zapnuto" if saved == "on" else "vypnuto")) \
                 if saved == want else \
-                '<p class="bad">Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
+                '<p class="bad">[OVL-E17] Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
             return self._html(page(info))
         if self.path == "/sms/send":
             to = "".join(c for c in form.get("to", "") if c in "+0123456789")
             to = normalize_msisdn(to)
             text = form.get("text", "")[:459]
             if not to or not text:
-                return self._html(page_sms('<p class="bad">Chybí číslo nebo text.</p>'))
+                return self._html(page_sms('<p class="bad">[OVL-E08] Chybí číslo nebo text.</p>'))
             try:
                 # Destination = cíl technologie, To = telefonní číslo. Driver si
                 # číslo bere z ast_msg_get_to(), tedy z To — ne z Destination
@@ -1044,16 +1309,16 @@ class Handler(BaseHTTPRequestHandler):
                     Base64Body=base64.b64encode(text.encode()).decode()))
                 ok = "Success" in resp.get("Response", "")
                 info = ('<p class="ok">SMS předána modemu (%s).</p>'
-                        if ok else '<p class="bad">Odeslání selhalo: %s</p>') \
+                        if ok else '<p class="bad">[OVL-E09] Odeslání selhalo: %s</p>') \
                     % esc(resp.get("Message", ""))
             except Exception as e:
-                info = '<p class="bad">Chyba spojení s telefonní částí: %s</p>' % esc(e)
+                info = '<p class="bad">[OVL-E18] Chyba spojení s telefonní částí: %s</p>' % esc(e)
             return self._html(page_sms(info))
         if self.path == "/telefon/qr":
             ip = ts_ip()
             if not ip:
                 return self._html(page_phone(
-                    '<p class="bad">Nejdřív připoj krabičku do privátní sítě '
+                    '<p class="bad">[OVL-E10] Nejdřív připoj miniserver do privátní sítě '
                     "(záložka Síť).</p>"))
             host = lan_ip() or ip
             url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token())
@@ -1062,7 +1327,7 @@ class Handler(BaseHTTPRequestHandler):
             key = form.get("authkey", "").strip()
             # auth klíče: base64-like tokeny (headscale hskey-auth-…)
             if not re.match(r"^[A-Za-z0-9_-]{20,200}$", key):
-                return self._html(page_net('<p class="bad">Tohle nevypadá jako auth klíč.</p>'))
+                return self._html(page_net('<p class="bad">[OVL-E11] Tohle nevypadá jako auth klíč.</p>'))
             try:
                 path = os.path.join(TS_DIR, "authkey")
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -1070,24 +1335,24 @@ class Handler(BaseHTTPRequestHandler):
                     f.write(key)
                 info = '<p class="ok">Klíč uložen — připojuji do privátní sítě.</p>'
             except OSError as e:
-                info = '<p class="bad">Nejde uložit klíč: %s</p>' % esc(e)
+                info = '<p class="bad">[OVL-E12] Nejde uložit klíč: %s</p>' % esc(e)
             return self._html(page_net(info))
         if self.path == "/net/partner":
             token = form.get("partner_token", "").strip()
             if not re.match(r"^cspk_[A-Za-z0-9_-]{10,200}$", token):
                 return self._html(page_net(
-                    '<p class="bad">Tohle nevypadá jako token brány '
+                    '<p class="bad">[OVL-E13] Tohle nevypadá jako token brány '
                     "(začíná cspk_).</p>"))
             try:
                 save_partner_token(token)
                 info = '<p class="ok">Token uložen — QR teď nastaví i síť.</p>'
             except OSError as e:
-                info = '<p class="bad">Nejde uložit token: %s</p>' % esc(e)
+                info = '<p class="bad">[OVL-E14] Nejde uložit token: %s</p>' % esc(e)
             return self._html(page_net(info))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
             if not cmd.upper().startswith("AT") or "CUSBPIDSWITCH" in cmd.upper():
-                return self._html(page_diag('<p class="bad">Povolené jsou jen AT příkazy (a CUSBPIDSWITCH nikdy).</p>'))
+                return self._html(page_diag('<p class="bad">[OVL-E15] Povolené jsou jen AT příkazy (a CUSBPIDSWITCH nikdy).</p>'))
             out = cli("quectel cmd %s %s" % (DEVICE, cmd))
             return self._html(page_diag('<p class="ok">%s</p>' % esc(out)))
         self._html("<p>404</p>", 404)

@@ -81,9 +81,17 @@ render() {
   # Web UI běží pod jiným uživatelem než Asterisk (na Umbrelu nobody):
   # data musí umět přečíst (fronta, žurnál) a do ts/ i zapsat (klíč sítě,
   # ten si ukládá s právy 600). Tajemství zůstávají jen pro Asterisk.
-  chmod 0755 "$DATA" "$DATA/queue" 2>/dev/null || true
-  chmod 0777 "$DATA/ts" 2>/dev/null || true
-  chmod 0644 "$DATA/journal.jsonl" 2>/dev/null || true
+  # Obsah zpráv a fronta nesmí být čitelné pro „ostatní" — čte je jen
+  # ústředna (vlastník) a ovládání (skupina nobody). Šifrování na disku
+  # nedává smysl: klíč by ležel hned vedle; skutečná ochrana dat v klidu
+  # je šifrovaný disk hostitele.
+  chmod 0750 "$DATA" "$DATA/queue" 2>/dev/null || true
+  chgrp 65534 "$DATA" "$DATA/queue" 2>/dev/null || true
+  chmod 0770 "$DATA/ts" 2>/dev/null || true
+  chgrp 65534 "$DATA/ts" 2>/dev/null || true
+  chgrp 65534 "$DATA/journal.jsonl" 2>/dev/null || true
+  chmod 0640 "$DATA/journal.jsonl" 2>/dev/null || true
+  find "$DATA/queue" -type f -exec chgrp 65534 {} + -exec chmod 0640 {} + 2>/dev/null || true
   # log Asterisku (volume bývá založený rootem — bez tohohle se nezapisuje
   # a Diagnostika ve web UI zůstane prázdná)
   chown -R asterisk /var/log/asterisk 2>/dev/null || \
@@ -211,6 +219,7 @@ lan_ip_loop() {
              | awk '{split($4,a,"/"); print a[1]; exit}')
       if [[ -n "$addr" && "$addr" != 100.* && "$addr" != 127.* ]]; then
         printf '%s' "$addr" > "$DATA/lan_ip.tmp" && mv "$DATA/lan_ip.tmp" "$DATA/lan_ip"
+      chgrp 65534 "$DATA/lan_ip" 2>/dev/null; chmod 0640 "$DATA/lan_ip" 2>/dev/null
       fi
     fi
     sleep 120
