@@ -97,6 +97,9 @@ render() {
 # je šifrovaný disk hostitele.
 common_setup() {
   mkdir -p "$DATA/queue" "$DATA/ts" "$DATA/webui"
+  # vlastníkem dat je ústředna (bez selfconfigu render nechown-uje a volume
+  # založený rootem by byl pro uživatele asterisk neprůchozí — astdb!)
+  chown asterisk "$DATA" "$DATA/queue" 2>/dev/null || true
   # setgid (2750/2770): soubory založené ústřednou (žurnál, fronta) dědí
   # skupinu ovládání — bez toho by každá SMS vytvořila soubor se skupinou
   # asterisk a ovládání by ho nepřečetlo
