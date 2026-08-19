@@ -67,3 +67,14 @@ jinam než k němu samotnému — není to router ani výstupní uzel.
 
 Výjimkou je, když si výstupní uzel zapneš sám (viz otázka o komerční VPN
 výš) — pak přes něj jde všechno, protože přesně o to jde.
+
+## Po připojení aplikace přestal na telefonu fungovat internet
+
+Zkontroluj systémové nastavení VPN: **Nastavení → Síť a internet → VPN →
+Phone21 → „Blokovat připojení bez VPN"**. Tahle volba říká systému, že nic
+nesmí ven mimo VPN — jenže privátní síť Phone21 vede jen telefonování,
+takže zbytek telefonu zůstane odříznutý. Volbu u Phone21 vypni; aplikace
+na zapnutou volbu od verze 21p.24 sama upozorní notifikací.
+
+(Pokud používáš jinou VPN na celý provoz, téhle volby se to netýká —
+patří k té druhé aplikaci, ne k Phone21.)
