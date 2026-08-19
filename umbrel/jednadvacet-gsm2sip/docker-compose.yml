@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.23@sha256:4d9cf7dc38be942c527d529c498427dcf5feace426081c18dca76f17b836354a
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.24@sha256:8afcf40cdfd0c4e013d3405bb90fb66dda363cd4bfe0377077f0d6dd011cb261
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
     # zdraví = CLI socket ústředny odpovídá (jen diagnostika pro docker ps;
@@ -63,7 +63,7 @@ services:
     # (Linphone se neumí přihlásit), chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.23@sha256:1d24ef8388f760dd17b91500c33bf8baa4ba81576e291d6d262071af84a40b42
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.24@sha256:dde269a4b897947ea1f278e9552ba7e6c3403ada94faa7700ecc877638e41f0b
     restart: on-failure
     # zdraví = přihlašovací stránka odpovídá; curl v obraze není,
     # kontrola jde přes python (stdlib)
