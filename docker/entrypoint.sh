@@ -78,6 +78,11 @@ render() {
     && mv /tmp/manager.conf.new /etc/asterisk/manager.conf
   mkdir -p "$DATA/queue" "$DATA/ts"
   chown -R asterisk "$DATA" /etc/asterisk 2>/dev/null || true
+  # stav ovládání (token brány, tajemství 2FA) vlastní ovládání (nobody)
+  # a jeho soubory jsou 0600 — chown výš ho nesmí sebrat, jinak po
+  # restartu nejde přečíst token (QR bez klíče sítě) ani kód 2FA
+  # (zamčené přihlášení)
+  [[ -d "$DATA/webui" ]] && chown -R 65534:65534 "$DATA/webui" 2>/dev/null || true
   # webui (běží jako nobody) potřebuje SIP i AMI heslo — dáme mu přístup
   # přes skupinu, ne pro celý svět
   chgrp 65534 "$SECRETS" 2>/dev/null || true

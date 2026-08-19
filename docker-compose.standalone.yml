@@ -17,7 +17,7 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.23
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.24
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -68,7 +68,7 @@ services:
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.23
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.24
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped

@@ -3,7 +3,7 @@ id: jednadvacet-gsm2sip
 category: networking
 icon: https://phone.twentyone.cz/img/phone21-icon.svg
 name: Phone21
-version: "0.9.23"
+version: "0.9.24"
 tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
   Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
@@ -35,11 +35,7 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Zvuk hovorů z mobilní sítě hraje správnou rychlostí (dřív zněl zpomaleně
-  a nesrozumitelně). Přijaté zprávy se po zpracování mažou ze SIM karty —
-  plná SIM dřív tiše blokovala příjem nových zpráv. Dlaždice síly signálu
-  už neukazuje otazník, záložka Telefon nově hlásí, jestli si telefon vzal
-  konfiguraci i s klíčem do sítě (a případný důvod, proč ne). Historie
-  hovorů už neukazuje vnitřní záznamy o doručování zpráv jako nespojené
-  hovory. Záznamy aplikace běží v místním čase a samy se uklízejí,
-  historie hovorů neroste donekonečna.
+  Opravné vydání: po restartu aplikace si ovládání nemohlo přečíst vlastní
+  uložená nastavení — QR pro telefon pak vyšlo bez klíče do privátní sítě
+  a se zapnutým dvoufázovým ověřením se nešlo přihlásit. Opraveno; obojí
+  teď restart přežije.
