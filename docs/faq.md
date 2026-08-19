@@ -76,5 +76,9 @@ nesmí ven mimo VPN — jenže privátní síť Phone21 vede jen telefonování,
 takže zbytek telefonu zůstane odříznutý. Volbu u Phone21 vypni; aplikace
 na zapnutou volbu od verze 21p.24 sama upozorní notifikací.
 
+Od verze 21p.26 aplikace systému rovnou říká, že trvalé připojení
+(always-on) nepodporuje — volba „Blokovat připojení bez VPN" se u ní už
+vůbec nenabízí a omylem zapnout nejde.
+
 (Pokud používáš jinou VPN na celý provoz, téhle volby se to netýká —
 patří k té druhé aplikaci, ne k Phone21.)

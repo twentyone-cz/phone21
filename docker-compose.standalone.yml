@@ -17,19 +17,32 @@
 
 services:
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.22
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.23
     build:
       context: .
       dockerfile: docker/Dockerfile
     container_name: gsm2sip-asterisk
     restart: unless-stopped
     network_mode: host
+    # zdraví = CLI socket ústředny odpovídá (jen diagnostika pro docker ps;
+    # restart policy na unhealthy nereaguje); start_period kryje čekání
+    # entrypointu na adresu privátní sítě před startem ústředny
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     environment:
       TZ: ${TZ:-Europe/Prague}
       GSM2SIP_SELFCONFIG: "1"
       SUPERVISE: "1"
       WATCHDOG_INTERNAL: "1"
       MBN_INTERNAL: "1"
+      # VoLTE profil: auto = volba podle mapy operátor→profil (MBN_MAP);
+      # mapa jde dodat i souborem mbn.env v datovém adresáři
+      MBN_PROFILE: ${MBN_PROFILE:-auto}
+      MBN_MAP: ${MBN_MAP:-}
       COUNTRY_CODE: ${COUNTRY_CODE:-420}
       AMI_BIND: 0.0.0.0
       # webui běží v bridge síti dockeru → povolit lokální + docker subnety
@@ -55,10 +68,18 @@ services:
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.22
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.23
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped
+    # zdraví = přihlašovací stránka odpovídá; curl v obraze není,
+    # kontrola jde přes python (stdlib)
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     # 8091 = provisioning softphonu: musí být dosažitelný z telefonu přímo
     # (Linphone se neumí přihlásit), chrání ho jednorázový token
     ports:

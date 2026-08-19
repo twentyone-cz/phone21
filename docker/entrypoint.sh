@@ -96,6 +96,12 @@ render() {
 # nedává smysl: klíč by ležel hned vedle; skutečná ochrana dat v klidu
 # je šifrovaný disk hostitele.
 common_setup() {
+  # Čas v logu: ústředna čte /etc/localtime, proměnnou TZ ne — bez tohohle
+  # by messages.log i historie hovorů běžely v UTC a mátly diagnostiku.
+  if [[ -n "${TZ:-}" && -e "/usr/share/zoneinfo/$TZ" ]]; then
+    ln -sfn "/usr/share/zoneinfo/$TZ" /etc/localtime 2>/dev/null || true
+    printf '%s\n' "$TZ" > /etc/timezone 2>/dev/null || true
+  fi
   mkdir -p "$DATA/queue" "$DATA/ts" "$DATA/webui"
   # vlastníkem dat je ústředna (bez selfconfigu render nechown-uje a volume
   # založený rootem by byl pro uživatele asterisk neprůchozí — astdb!)
@@ -202,7 +208,21 @@ mbn_loop() {
     if [[ -c /dev/cdc-wdm0 ]]; then
       # profil se řeší jednou za 10 minut, IMS stav každou minutu (levné)
       if [[ $((n % 10)) -eq 0 ]]; then
-        MBN_PROFILE="${MBN_PROFILE:-auto}" /opt/gsm2sip/scripts/mbn-profile.sh auto || true
+        # mapa operátor→profil jde dodat i souborem mbn.env v datovém
+        # adresáři (přežije update aplikace); čte se před každou volbou.
+        # Soubor se NIKDY nespouští (žádný source — běžíme jako root),
+        # berou se z něj jen hodnoty řádků MBN_PROFILE=/MBN_MAP=;
+        # případné "uvozovky" kolem hodnoty se odloupnou.
+        if [[ -f "$DATA/mbn.env" ]]; then
+          mbn_v="$(sed -n 's/^MBN_PROFILE=//p' "$DATA/mbn.env" 2>/dev/null | tail -1)"
+          mbn_v="${mbn_v%\"}"; mbn_v="${mbn_v#\"}"
+          [[ -n "$mbn_v" ]] && MBN_PROFILE="$mbn_v"
+          mbn_v="$(sed -n 's/^MBN_MAP=//p' "$DATA/mbn.env" 2>/dev/null | tail -1)"
+          mbn_v="${mbn_v%\"}"; mbn_v="${mbn_v#\"}"
+          [[ -n "$mbn_v" ]] && MBN_MAP="$mbn_v"
+        fi
+        MBN_PROFILE="${MBN_PROFILE:-auto}" MBN_MAP="${MBN_MAP:-}" \
+          /opt/gsm2sip/scripts/mbn-profile.sh auto || true
       fi
       v="$(volte_probe || echo unknown)"
       printf '%s\n' "$v" > "$DATA/volte.tmp" 2>/dev/null \
@@ -252,6 +272,44 @@ lan_ip_loop() {
   done
 }
 lan_ip_loop &
+
+# Rotace rostoucích souborů: log ústředny přes 'logger rotate' (drží se
+# jen jedna starší generace), historie hovorů a SMS žurnál ořezem
+# s ponecháním posledních N řádků. Po ořezu se musí vrátit vlastník
+# a práva: soubor zapisuje ústředna a čte ho ovládání (skupina).
+rotate_loop() {
+  local astlog=/var/log/asterisk
+  local max_kb="${LOG_MAX_KB:-5120}" cdr_keep="${CDR_KEEP:-5000}" jr_keep="${JOURNAL_KEEP:-1000}"
+  size_kb() { local s; s=$(stat -c %s "$1" 2>/dev/null || echo 0); echo $(( s / 1024 )); }
+  trim() { # $1 = soubor, $2 = kolik posledních řádků ponechat
+    tail -n "$2" "$1" > "$1.tmp" 2>/dev/null || { rm -f "$1.tmp"; return 0; }
+    # vlastník a práva ještě PŘED výměnou — jinak by mezi mv a chown
+    # zapisovatel (ústředna) dostal EACCES a záznam by se tiše ztratil
+    chown asterisk "$1.tmp" 2>/dev/null || true
+    chgrp 65534 "$1.tmp" 2>/dev/null || true
+    chmod 0640 "$1.tmp" 2>/dev/null || true
+    mv "$1.tmp" "$1" 2>/dev/null || rm -f "$1.tmp"
+  }
+  while true; do
+    sleep 3600
+    if [[ $(size_kb "$astlog/messages.log") -ge $max_kb || $(size_kb "$astlog/debug.log") -ge $max_kb ]]; then
+      asterisk -rx 'logger rotate' >/dev/null 2>&1 || true
+      # z generací se drží jen nejnovější — podle času, ne podle čísla
+      # (číslování se liší podle rotatestrategy a starý vyrenderovaný
+      # logger.conf na bind mountu ji mít nemusí)
+      for b in messages.log debug.log; do
+        ls -t "$astlog/$b".* 2>/dev/null | tail -n +2 | xargs -r rm -f
+      done
+      # nový messages.log musí zůstat čitelný pro Diagnostiku v ovládání
+      chmod 0644 "$astlog/messages.log" 2>/dev/null || true
+    fi
+    [[ $(size_kb "$astlog/cdr-csv/Master.csv") -ge 1024 ]] \
+      && trim "$astlog/cdr-csv/Master.csv" "$cdr_keep"
+    [[ $(size_kb "$DATA/journal.jsonl") -ge 1024 ]] \
+      && trim "$DATA/journal.jsonl" "$jr_keep"
+  done
+}
+rotate_loop &
 
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
   while true; do

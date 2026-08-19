@@ -15,12 +15,25 @@ services:
     image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.22@sha256:9e36fb4a885f07743e1c436aab892889d5683abce2fb6dd881fa14101194fd7a
     restart: on-failure
     network_mode: host            # RTP rozsah portů + SIP na tailnet IP
+    # zdraví = CLI socket ústředny odpovídá (jen diagnostika pro docker ps;
+    # restart policy na unhealthy nereaguje); start_period kryje čekání
+    # entrypointu na adresu privátní sítě před startem ústředny
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     environment:
       TZ: ${TZ:-Europe/Prague}
       GSM2SIP_SELFCONFIG: "1"     # render konfigurace při každém startu
       SUPERVISE: "1"              # restart procesu po pádu/watchdogu
       WATCHDOG_INTERNAL: "1"      # hlídání modemu (Umbrel nemá host systemd)
       MBN_INTERNAL: "1"           # VoLTE carrier profil (viz mbn-profile.sh)
+      # VoLTE profil: auto = volba podle mapy operátor→profil (MBN_MAP);
+      # mapa jde dodat souborem mbn.env v datovém adresáři aplikace
+      MBN_PROFILE: ${MBN_PROFILE:-auto}
+      MBN_MAP: ${MBN_MAP:-}
       COUNTRY_CODE: "420"
       # AMI: webui běží v bridge síti appky → bind všude, ale ACL pouští jen
       # localhost a interní Umbrel subnety (deny 0.0.0.0/0 je v šabloně):
@@ -52,6 +65,14 @@ services:
       - "8091:8091"
     image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.22@sha256:e3e9f9493be7f82f6b95984a301d32b6d74eee8b2640c7d653981f16f07dbd45
     restart: on-failure
+    # zdraví = přihlašovací stránka odpovídá; curl v obraze není,
+    # kontrola jde přes python (stdlib)
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     environment:
       TZ: ${TZ:-Europe/Prague}
       WEBUI_PASSWORD: ${APP_PASSWORD}

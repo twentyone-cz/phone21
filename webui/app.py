@@ -174,6 +174,10 @@ def normalize_msisdn(num, cc=None):
 _prov_tokens = {}          # token -> (expiruje, použito)
 _prov_lock = threading.Lock()
 
+# Poslední stažení konfigurace telefonem — záložka Telefon z něj ukáže,
+# jestli si telefon XML vzal a jestli k účtu dostal i klíč do sítě.
+_prov_last = {"t": 0.0, "err": "", "key": False}
+
 
 _PROV_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # bez záměnitelných znaků
 
@@ -265,7 +269,9 @@ def request_network_key():
         PARTNER_URL.rstrip("/") + "/partner/preauthkeys", method="POST",
         headers={"Authorization": "Bearer " + token, "Content-Length": "0"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        # telefon na konfiguraci čeká jen krátce — radši QR bez sítě
+        # (a viditelná chyba) než aby to telefon vzdal dřív než my
+        with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read())
         return data.get("key", ""), data.get("login_server", PARTNER_URL), ""
     except urllib.error.HTTPError as e:
@@ -638,7 +644,8 @@ def modem_summary():
 def signal_percent(rssi):
     """RSSI z modemu je 0–31 (99 = neznámý) — pro lidi převedeno na procenta."""
     try:
-        value = int(str(rssi).split()[0])
+        # modem hlásí i tvar „20, -73 dBm" — čárka za číslem musí pryč
+        value = int(str(rssi).split()[0].rstrip(","))
     except (TypeError, ValueError):
         return "?"
     if not 0 <= value <= 31:
@@ -672,6 +679,10 @@ def read_cdr(limit=30):
             except (StopIteration, _csv.Error):
                 continue
             if len(cols) < 15:
+                continue
+            # interní kanály (doručování zpráv, potvrzenky, opakované
+            # pokusy) nejsou hovory — do historie nepatří
+            if cols[5].startswith("Local/"):
                 continue
             incoming = cols[5].startswith("Quectel/")
             rows.append({
@@ -984,6 +995,19 @@ def page_phone(info=""):
             '<p class="warn">Krabička zatím není v privátní síti, takže se '
             "k ní telefon zvenku nedovolá. Připoj ji na záložce "
             '<a href="%s">Síť</a> — pak se sem vrať.</p>' % u("/net"))
+    if _prov_last["t"]:
+        when = time.strftime("%H:%M", time.localtime(_prov_last["t"]))
+        if _prov_last["err"]:
+            blocks.append('<p class="warn">Telefon si konfiguraci stáhl '
+                          "(naposledy %s), ale bez klíče do sítě: %s</p>"
+                          % (when, esc(_prov_last["err"])))
+        elif _prov_last["key"]:
+            blocks.append('<p><span class="ok">Telefon si konfiguraci stáhl '
+                          "(naposledy %s), včetně klíče do sítě.</span></p>" % when)
+        else:
+            blocks.append('<p class="small muted">Telefon si konfiguraci '
+                          "stáhl (naposledy %s) — jen účet, bez tokenu na "
+                          "záložce Síť klíč nenese.</p>" % when)
     blocks.append(
         "<p>Do telefonu si nainstaluj aplikaci <b>Phone21</b> a naskenuj kód — "
         "účet, heslo i adresa miniserveru se nastaví samy:</p>"
@@ -1507,7 +1531,11 @@ class ProvHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         # klíč do sítě se bere až teď: platí hodinu a telefon ho použije hned
-        ts_key, ts_url, _err = request_network_key()
+        ts_key, ts_url, err = request_network_key()
+        _prov_last.update(t=time.time(), err=err, key=bool(ts_key))
+        if err:
+            print("[prov] stažení z %s: účet ano, síť ne — %s"
+                  % (self.client_address[0], err), flush=True)
         data = prov_xml(ip, ts_url, ts_key).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/xml; charset=utf-8")
