@@ -38,9 +38,16 @@ docker buildx build \
   --push \
   "${REPO}/webui"
 
+echo "==> ${REGISTRY}/phone21-dav:${VERSION}"
+docker buildx build \
+  --platform "${PLATFORMS}" \
+  --tag "${REGISTRY}/phone21-dav:${VERSION}" \
+  --push \
+  "${REPO}/dav"
+
 echo
 echo "Digesty pro připnutí v umbrel compose:"
-for img in phone21-pbx phone21-ui; do
+for img in phone21-pbx phone21-ui phone21-dav; do
   docker buildx imagetools inspect "${REGISTRY}/${img}:${VERSION}" \
     | awk -v i="${REGISTRY}/${img}" '/^Digest:/{print i "@" $2; exit}'
 done

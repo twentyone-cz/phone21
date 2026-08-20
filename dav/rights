@@ -1,0 +1,23 @@
+# Interní správce ovládání: smí všechno (zakládá kolekce, importuje).
+[admin]
+user: _phone21
+collection: .*
+permissions: RrWw
+
+# Kořen: každý přihlášený smí číst seznam (jinak klienti neprojdou discovery).
+[root]
+user: .+
+collection:
+permissions: R
+
+# Vlastní adresář uživatele.
+[principal]
+user: .+
+collection: {user}
+permissions: RW
+
+# Kolekce uvnitř vlastního adresáře.
+[collections]
+user: .+
+collection: {user}/[^/]+
+permissions: rw

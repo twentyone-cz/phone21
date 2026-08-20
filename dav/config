@@ -1,0 +1,26 @@
+[server]
+hosts = 0.0.0.0:5232
+max_connections = 20
+
+[auth]
+type = htpasswd
+htpasswd_filename = /data/config/users
+htpasswd_encryption = bcrypt
+cache_logins = True
+lc_username = True
+delay = 1
+realm = Phone21
+
+[rights]
+type = from_file
+file = /etc/radicale/rights
+
+[storage]
+filesystem_folder = /data/collections
+
+[web]
+type = none
+
+[logging]
+level = warning
+mask_passwords = True

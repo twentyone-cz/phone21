@@ -89,6 +89,9 @@ services:
       AMI_HOST: host.docker.internal
       AMI_SECRETS_FILE: /var/lib/phone21/secrets.env
       TS_DIR: /var/lib/phone21/ts
+      DAV_URL: http://dav:5232
+      DAV_DIR: /var/lib/phone21-dav
+      DAV_PORT: "5232"
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -129,3 +132,15 @@ services:
           [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
           sleep 60
         done
+
+  # Kontakty a kalendář (server pro synchronizaci zařízení).
+  dav:
+    build: ./dav
+    container_name: phone21-dav
+    restart: on-failure
+    ports:
+      - "5232:5232"
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+    volumes:
+      - ./data/dav:/data

@@ -79,6 +79,9 @@ services:
       # si ho přečte ze sdíleného souboru:
       AMI_SECRETS_FILE: /var/lib/phone21/secrets.env
       TS_DIR: /var/lib/phone21/ts
+      DAV_URL: http://dav:5232
+      DAV_DIR: /var/lib/phone21-dav
+      DAV_PORT: "5232"
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
       UI_MODE: gui             # spotřebitelský dashboard (Docker default = expert)
       NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/pay}
@@ -90,6 +93,7 @@ services:
       # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
       - ${APP_DATA_DIR}/data/smsdata/webui:/var/lib/phone21/webui:rw
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk:ro
+      - ${APP_DATA_DIR}/data/dav/config:/var/lib/phone21-dav:rw
 
   net:
     # Sidecar privátní sítě (login server CockScale, telemetrie vypnutá).
@@ -126,3 +130,20 @@ services:
           [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
           sleep 60
         done
+
+  # Kontakty a kalendář (server pro synchronizaci zařízení).
+  dav:
+    image: ghcr.io/twentyone-cz/phone21-dav:0.9.27
+    restart: on-failure
+    ports:
+      - "5232:5232"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5232/.web/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    environment:
+      TZ: ${TZ:-Europe/Prague}
+    volumes:
+      - ${APP_DATA_DIR}/data/dav:/data

@@ -7,6 +7,7 @@ Určeno výhradně pro LAN/privátní síť — nikdy nevystavovat veřejně.
 """
 
 import base64
+import hashlib
 import html
 import json
 import os
@@ -42,6 +43,24 @@ COUNTRY_CODE = os.environ.get("COUNTRY_CODE", "420")
 # (AMI_PASSWORD env pak není nastavené) a privátní síť se ovládá přes TS_DIR.
 AMI_SECRETS_FILE = os.environ.get("AMI_SECRETS_FILE", "")
 TS_DIR = os.environ.get("TS_DIR", "")
+# --- Kontakty a kalendář (server pro synchronizaci) --------------------------
+DAV_URL = os.environ.get("DAV_URL", "")
+DAV_DIR = os.environ.get("DAV_DIR", "")
+DAV_PORT = os.environ.get("DAV_PORT", "5232")
+DAV_ADMIN = "_phone21"
+DAV_BOOK = "kontakty"
+DAV_CAL = "kalendar"
+DAV_USER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
+DAV_IMPORT_MAX = 20 * 1024 * 1024
+try:
+    import bcrypt as _bcrypt
+except ImportError:
+    _bcrypt = None
+DAV_ENABLED = bool(DAV_URL and DAV_DIR and _bcrypt)
+_dav_lock = threading.Lock()
+_dav_import = {"running": False, "done": 0, "skipped": 0, "failed": 0,
+               "total": 0, "errors": [], "kind": ""}
+
 # Jméno účtu zobrazené v softphonu (přihlašovací jméno zůstává interní)
 ACCOUNT_LABEL = os.environ.get("ACCOUNT_LABEL", "myGSM")
 # UI režim: "expert" = technické záložky (Docker/LXC default),
@@ -464,6 +483,310 @@ def tail_log(n=120):
         return "(log %s není k dispozici)" % LOG_FILE
 
 
+
+# --- Kontakty a kalendář -----------------------------------------------------
+
+def dav_users_path():
+    return os.path.join(DAV_DIR, "users")
+
+
+def dav_admin_path():
+    return os.path.join(DAV_DIR, "admin")
+
+
+def dav_read_users():
+    """{jméno: hash} ze souboru účtů."""
+    out = {}
+    try:
+        with open(dav_users_path()) as f:
+            for line in f:
+                line = line.strip()
+                if not line or ":" not in line:
+                    continue
+                name, _, h = line.partition(":")
+                out[name] = h
+    except OSError:
+        pass
+    return out
+
+
+def dav_write_users(users):
+    data = "".join("%s:%s\n" % (n, h) for n, h in sorted(users.items()))
+    write_state(dav_users_path(), data)
+
+
+def dav_hash(password):
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt(10)).decode()
+
+
+def dav_new_password(groups=4):
+    return "-".join(
+        "".join(_s.choice(_PROV_ALPHABET) for _ in range(4)) for _ in range(groups)
+    )
+
+
+def dav_admin_password():
+    """Heslo interního správce; když chybí nebo neodpovídá, obnoví se."""
+    try:
+        with open(dav_admin_path()) as f:
+            password = f.read().strip()
+    except OSError:
+        password = ""
+    users = dav_read_users()
+    if password and DAV_ADMIN in users:
+        return password
+    password = dav_new_password(6)
+    users[DAV_ADMIN] = dav_hash(password)
+    dav_write_users(users)
+    write_state(dav_admin_path(), password)
+    audit("dav admin heslo obnoveno")
+    return password
+
+
+def dav_request(method, path, body=None, ctype=None, headers=None):
+    """Dotaz na úložiště jménem interního správce → (status, tělo)."""
+    url = DAV_URL.rstrip("/") + path
+    req = urllib.request.Request(url, data=body, method=method)
+    token = base64.b64encode(
+        ("%s:%s" % (DAV_ADMIN, dav_admin_password())).encode()
+    ).decode()
+    req.add_header("Authorization", "Basic " + token)
+    if ctype:
+        req.add_header("Content-Type", ctype)
+    for key, value in (headers or {}).items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as e:
+        return 0, str(e).encode()
+
+
+MKCOL_BOOK = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<mkcol xmlns="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav">'
+    "<set><prop><resourcetype><collection/><CR:addressbook/></resourcetype>"
+    "<displayname>Kontakty</displayname></prop></set></mkcol>"
+)
+MKCOL_CAL = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<mkcol xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">'
+    "<set><prop><resourcetype><collection/><C:calendar/></resourcetype>"
+    "<displayname>Kalendář</displayname>"
+    "<C:supported-calendar-component-set>"
+    '<C:comp name="VEVENT"/><C:comp name="VTODO"/><C:comp name="VJOURNAL"/>'
+    "</C:supported-calendar-component-set></prop></set></mkcol>"
+)
+
+
+def dav_ensure_collections(user):
+    """Založí adresář uživatele i kolekce; 405 = už existuje."""
+    for path, body in (("/%s/" % user, None),
+                       ("/%s/%s/" % (user, DAV_BOOK), MKCOL_BOOK),
+                       ("/%s/%s/" % (user, DAV_CAL), MKCOL_CAL)):
+        status, data = dav_request(
+            "MKCOL", path,
+            body.encode() if body else None,
+            "application/xml; charset=utf-8" if body else None,
+        )
+        if status not in (201, 405):
+            return False, "%s → %s %s" % (path, status, data[:120].decode(errors="replace"))
+    return True, ""
+
+
+def dav_user_add(name):
+    users = dav_read_users()
+    if name in users:
+        return None, "[OVL-E25] Účet %s už existuje." % esc(name)
+    password = dav_new_password()
+    users[name] = dav_hash(password)
+    dav_write_users(users)
+    ok, detail = dav_ensure_collections(name)
+    if not ok:
+        return None, "[OVL-E26] Úložiště účet nepřijalo: %s" % esc(detail)
+    audit("dav user ADD %s" % name)
+    return password, ""
+
+
+def dav_user_reset(name):
+    users = dav_read_users()
+    if name not in users:
+        return None, "[OVL-E25] Účet %s neexistuje." % esc(name)
+    password = dav_new_password()
+    users[name] = dav_hash(password)
+    dav_write_users(users)
+    audit("dav user RESET %s" % name)
+    return password, ""
+
+
+def dav_user_del(name, drop_data=False):
+    users = dav_read_users()
+    if name not in users:
+        return "[OVL-E25] Účet %s neexistuje." % esc(name)
+    del users[name]
+    dav_write_users(users)
+    if drop_data:
+        dav_request("DELETE", "/%s/" % name)
+    audit("dav user DEL %s data=%s" % (name, drop_data))
+    return ""
+
+
+def split_vcards(text):
+    """Rozdělí .vcf na jednotlivé vizitky; chybějící UID doplní."""
+    out = []
+    current = []
+    for line in text.splitlines():
+        if line.strip().upper().startswith("BEGIN:VCARD"):
+            current = [line]
+        elif current:
+            current.append(line)
+            if line.strip().upper().startswith("END:VCARD"):
+                card = "\r\n".join(current)
+                uid = ""
+                for entry in current:
+                    if entry.upper().startswith("UID:"):
+                        uid = entry.split(":", 1)[1].strip()
+                if not uid:
+                    uid = "p21-" + hashlib.sha1(card.encode()).hexdigest()[:24]
+                    card = card.replace("END:VCARD", "UID:%s\r\nEND:VCARD" % uid)
+                out.append((uid, card))
+                current = []
+    return out
+
+
+def split_ics(text):
+    """Rozdělí .ics na položky podle UID (opakování sdílí UID)."""
+    lines = text.splitlines()
+    header = []
+    timezones = []
+    comps = {}
+    order = []
+    block = None
+    kind = ""
+    in_tz = False
+    tz_block = []
+    for line in lines:
+        upper = line.strip().upper()
+        if upper.startswith("BEGIN:VTIMEZONE"):
+            in_tz = True
+            tz_block = [line]
+            continue
+        if in_tz:
+            tz_block.append(line)
+            if upper.startswith("END:VTIMEZONE"):
+                timezones.append("\r\n".join(tz_block))
+                in_tz = False
+            continue
+        if upper.startswith("BEGIN:V") and not upper.startswith("BEGIN:VCALENDAR"):
+            block = [line]
+            kind = upper[len("BEGIN:"):]
+            continue
+        if block is not None:
+            block.append(line)
+            if upper.startswith("END:" + kind):
+                uid = ""
+                for entry in block:
+                    if entry.upper().startswith("UID:"):
+                        uid = entry.split(":", 1)[1].strip()
+                if not uid:
+                    uid = "p21-" + hashlib.sha1(
+                        "\n".join(block).encode()).hexdigest()[:24]
+                    block.insert(1, "UID:" + uid)
+                if uid not in comps:
+                    comps[uid] = []
+                    order.append(uid)
+                comps[uid].append("\r\n".join(block))
+            continue
+        if upper.startswith("BEGIN:VCALENDAR") or upper.startswith("VERSION:") \
+                or upper.startswith("PRODID:") or upper.startswith("CALSCALE:"):
+            header.append(line)
+    if not header:
+        header = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Phone21//import//CS"]
+    out = []
+    for uid in order:
+        parts = list(header) + timezones + comps[uid] + ["END:VCALENDAR"]
+        out.append((uid, "\r\n".join(parts)))
+    return out
+
+
+def dav_href(uid, suffix):
+    safe = re.sub(r"[^A-Za-z0-9._-]", "-", uid)
+    if len(safe) > 80:
+        safe = hashlib.sha1(uid.encode()).hexdigest()
+    return safe + suffix
+
+
+def dav_import_run(user, kind, items):
+    """Položky se ukládají po jedné; existující UID se přeskočí."""
+    collection = DAV_BOOK if kind == "vcard" else DAV_CAL
+    ctype = "text/vcard; charset=utf-8" if kind == "vcard" \
+        else "text/calendar; charset=utf-8"
+    suffix = ".vcf" if kind == "vcard" else ".ics"
+    for uid, body in items:
+        path = "/%s/%s/%s" % (user, collection, dav_href(uid, suffix))
+        status, data = dav_request(
+            "PUT", path, body.encode("utf-8"), ctype,
+            {"If-None-Match": "*"},
+        )
+        with _dav_lock:
+            if status in (201, 204):
+                _dav_import["done"] += 1
+            elif status == 412:
+                _dav_import["skipped"] += 1
+            else:
+                _dav_import["failed"] += 1
+                if len(_dav_import["errors"]) < 20:
+                    _dav_import["errors"].append(
+                        "%s → %s" % (uid[:40], status))
+    with _dav_lock:
+        _dav_import["running"] = False
+    audit("dav import %s hotovo done=%d skip=%d fail=%d" % (
+        kind, _dav_import["done"], _dav_import["skipped"], _dav_import["failed"]))
+
+
+def dav_import_start(user, raw):
+    """Rozpozná druh souboru a spustí import na pozadí."""
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("cp1250")
+        except UnicodeDecodeError:
+            return "[OVL-E27] Soubor není v čitelném kódování."
+    upper = text.upper()
+    if "BEGIN:VCARD" in upper:
+        kind, items = "vcard", split_vcards(text)
+    elif "BEGIN:VCALENDAR" in upper:
+        kind, items = "ical", split_ics(text)
+    else:
+        return "[OVL-E27] Tohle není soubor s kontakty ani s kalendářem."
+    if not items:
+        return "[OVL-E27] V souboru není žádná položka."
+    with _dav_lock:
+        if _dav_import["running"]:
+            return "[OVL-E29] Import už běží."
+        _dav_import.update({"running": True, "done": 0, "skipped": 0,
+                            "failed": 0, "total": len(items), "errors": [],
+                            "kind": kind})
+    audit("dav import start %s %d položek → %s" % (kind, len(items), user))
+    threading.Thread(target=dav_import_run, args=(user, kind, items),
+                     daemon=True).start()
+    return ""
+
+
+def dav_urls():
+    """Adresy, na kterých je úložiště vidět (domácí síť, privátní síť)."""
+    out = []
+    lan = lan_ip()
+    if lan:
+        out.append(("domácí síť", "http://%s:%s/" % (lan, DAV_PORT)))
+    tun = ts_ip()
+    if tun:
+        out.append(("privátní síť", "http://%s:%s/" % (tun, DAV_PORT)))
+    return out
+
 # Vzhled: gui = produktový (jednadvacet), expert = utilitární
 ACCENT = "#F7931A" if GUI else "#7fb069"
 
@@ -555,6 +878,8 @@ def render(active, body, extra=""):
                 (u("/telefon"), "phone", "Telefon", ready)]
         if TS_DIR:
             tabs.append((u("/net"), "net", "Síť", True))
+        if DAV_ENABLED:
+            tabs.append((u("/dav"), "dav", "Kontakty a kalendář", True))
         tabs.append((u("/stav"), "status", "Pokročilé", True))
         brand = "<b>Phone21</b>"
     else:
@@ -562,6 +887,8 @@ def render(active, body, extra=""):
                 (u("/telefon"), "phone", "Telefon", ready)]
         if TS_DIR:
             tabs.append((u("/net"), "net", "Síť", True))
+        if DAV_ENABLED:
+            tabs.append((u("/dav"), "dav", "Kontakty a kalendář", True))
         tabs.append((u("/diag"), "diag", "Diagnostika", True))
         brand = "<b>Phone21</b>"
     nav = ""
@@ -1054,6 +1381,88 @@ def page_net(info=""):
     return render("net", "".join(blocks))
 
 
+def _dav_user_row(name):
+    return (
+        "<tr><td><b>%s</b></td><td>"
+        '<form class="inline" method="post" action="%s">'
+        '<input type="hidden" name="user" value="%s">'
+        "<button>Nové heslo</button></form> "
+        '<form class="inline" method="post" action="%s">'
+        '<input type="hidden" name="user" value="%s">'
+        '<label class="small"><input type="checkbox" name="drop" value="1"> '
+        "smazat i data</label> "
+        '<button class="ghost">Smazat</button></form></td></tr>'
+    ) % (esc(name), u("/dav/user/pass"), esc(name),
+         u("/dav/user/del"), esc(name))
+
+
+def page_dav(info=""):
+    """Kontakty a kalendář: účty pro zařízení, import, návod k nastavení."""
+    blocks = [info, "<h1>Kontakty a kalendář</h1>"]
+    status, _ = dav_request("PROPFIND", "/", None, None, {"Depth": "0"})
+    if status == 0:
+        blocks.append('<p class="bad">[OVL-E23] Úložiště zatím neodpovídá — '
+                      "zkus to za chvíli.</p>")
+    users = [x for x in sorted(dav_read_users()) if x != DAV_ADMIN]
+    rows = "".join(_dav_user_row(x) for x in users) or \
+        '<tr><td colspan="2" class="muted">zatím žádný účet</td></tr>'
+    blocks.append(
+        "<h2>Účty</h2>"
+        "<p>Každé zařízení dostane vlastní účet. Heslo se ukáže jen jednou — "
+        "zapiš si ho, jinak vydej nové.</p>"
+        "<table><tr><th>účet</th><th></th></tr>%s</table>"
+        '<form class="inline" method="post" action="%s">'
+        '<input name="user" placeholder="jmeno" size="20" required>'
+        "<button>Založit účet</button></form>"
+        '<p class="small muted">Jméno: malá písmena, číslice, tečka, pomlčka '
+        "nebo podtržítko, 2–32 znaků.</p>" % (rows, u("/dav/user/add")))
+
+    with _dav_lock:
+        imp = dict(_dav_import)
+    if imp["running"] or imp["total"]:
+        blocks.append(
+            '<p class="%s">Import (%s): %s — uloženo %d, přeskočeno %d, '
+            "chyb %d z %d.</p>%s"
+            % ("warn" if imp["running"] else "ok",
+               "kontakty" if imp["kind"] == "vcard" else "kalendář",
+               "probíhá" if imp["running"] else "hotovo",
+               imp["done"], imp["skipped"], imp["failed"], imp["total"],
+               ("<pre>%s</pre>" % esc("\n".join(imp["errors"])))
+               if imp["errors"] else ""))
+        if imp["running"]:
+            blocks.append('<meta http-equiv="refresh" content="3">')
+    options = "".join("<option>%s</option>" % esc(x) for x in users) or \
+        '<option value="">(nejdřív založ účet)</option>'
+    blocks.append(
+        "<h2>Import ze starého telefonu</h2>"
+        "<p>Nahraj soubor <b>.vcf</b> (kontakty) nebo <b>.ics</b> (kalendář). "
+        "Položky, které už na miniserveru jsou, se přeskočí — import jde "
+        "opakovat.</p>"
+        '<form method="post" action="%s" enctype="multipart/form-data">'
+        '<label>Účet: <select name="user">%s</select></label> '
+        '<input type="file" name="file" required> '
+        "<button>Nahrát</button></form>" % (u("/dav/import"), options))
+
+    url_rows = "".join(
+        '<tr><td>%s</td><td class="mono">%s</td></tr>' % (esc(label), esc(url))
+        for label, url in dav_urls())
+    blocks.append(
+        "<h2>Nastavení zařízení</h2>"
+        "<table><tr><th>odkud</th><th>adresa</th></tr>%s</table>"
+        "<p><b>Android:</b> nainstaluj synchronizační aplikaci (DAVx⁵ "
+        "z F-Droidu), přidej účet volbou <i>Přihlásit se pomocí URL a jména</i>, "
+        "vlož adresu výše, jméno účtu a heslo. Potvrď nešifrované spojení "
+        "v domácí síti a zapni <i>Kontakty</i> i <i>Kalendář</i>. V každém "
+        "profilu telefonu zvlášť.</p>"
+        "<p><b>iPhone:</b> Nastavení → Aplikace → Kontakty → Účty → Přidat "
+        "účet → Jiné → Přidat účet CardDAV; server je adresa výše bez "
+        "<i>http://</i>, v Upřesnit vypni SSL a nastav port %s. Kalendář "
+        "stejně přes CalDAV.</p>"
+        '<p class="small muted">Mimo domov funguje synchronizace jen přes '
+        "privátní síť.</p>" % (url_rows, esc(DAV_PORT)))
+    return render("dav", "".join(blocks))
+
+
 def page_phone(info=""):
     """Připojení telefonu: QR kód + ruční údaje."""
     sec = read_secrets()
@@ -1342,6 +1751,41 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _multipart(self, max_bytes):
+        """Vrátí (pole, jméno souboru, obsah) z formuláře s přílohou.
+        Pole je None, když je tělo větší než limit."""
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ctype or "boundary=" not in ctype:
+            return {}, "", b""
+        boundary = ctype.split("boundary=", 1)[1].strip().strip('"')
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > max_bytes:
+            return None, "", b""
+        raw = self.rfile.read(length)
+        sep = ("--" + boundary).encode()
+        fields, filename, content = {}, "", b""
+        for part in raw.split(sep):
+            if not part or part.strip() in (b"", b"--"):
+                continue
+            head, _, body = part.partition(b"\r\n\r\n")
+            if body.endswith(b"\r\n"):
+                body = body[:-2]
+            headers = head.decode("utf-8", "replace")
+            name = ""
+            for token in headers.replace("\r\n", ";").split(";"):
+                token = token.strip()
+                if token.startswith("name="):
+                    name = token[5:].strip('"')
+                elif token.startswith("filename="):
+                    filename = token[9:].strip('"')
+            if not name:
+                continue
+            if name == "file":
+                content = body
+            else:
+                fields[name] = body.decode("utf-8", "replace").strip()
+        return fields, filename, content
+
     def _form(self):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(min(length, 65536)).decode()
@@ -1371,6 +1815,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_phone())
         if self.path == "/net" and TS_DIR:
             return self._html(page_net())
+        if self.path == "/dav" and DAV_ENABLED:
+            return self._html(page_dav())
         if self.path == "/diag":
             # technický záznam jen v expert režimu
             return self._html(page_diag() if not GUI else page_status())
@@ -1417,6 +1863,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._authed():
             return self._deny()
+        if self.path == "/dav/import" and DAV_ENABLED:
+            fields, filename, content = self._multipart(DAV_IMPORT_MAX)
+            if fields is None:
+                return self._html(page_dav(
+                    '<p class="bad">[OVL-E28] Soubor je moc velký '
+                    "(limit 20 MB).</p>"))
+            user = (fields or {}).get("user", "").strip()
+            if not DAV_USER_RE.match(user) or user not in dav_read_users():
+                return self._html(page_dav(
+                    '<p class="bad">[OVL-E24] Vyber existující účet.</p>'))
+            if not content:
+                return self._html(page_dav(
+                    '<p class="bad">[OVL-E27] Soubor je prázdný.</p>'))
+            err = dav_import_start(user, content)
+            if err:
+                return self._html(page_dav('<p class="bad">%s</p>' % err))
+            return self._html(page_dav(
+                '<p class="ok">Import běží — stránka se sama obnovuje.</p>'))
         form = self._form()
         if self.path == "/2fa/setup":
             secret = base64.b32encode(os.urandom(20)).decode().rstrip("=")
@@ -1546,6 +2010,29 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 info = '<p class="bad">[OVL-E14] Nejde uložit token: %s</p>' % esc(e)
             return self._html(page_net(info))
+        if self.path.startswith("/dav/user/") and DAV_ENABLED:
+            name = form.get("user", "").strip().lower()
+            if not DAV_USER_RE.match(name) or name == DAV_ADMIN:
+                return self._html(page_dav(
+                    '<p class="bad">[OVL-E24] Tohle jméno účtu nejde '
+                    "použít.</p>"))
+            if self.path == "/dav/user/add":
+                password, err = dav_user_add(name)
+            elif self.path == "/dav/user/pass":
+                password, err = dav_user_reset(name)
+            elif self.path == "/dav/user/del":
+                err = dav_user_del(name, form.get("drop", "") == "1")
+                return self._html(page_dav(
+                    ('<p class="bad">%s</p>' % err) if err else
+                    '<p class="ok">Účet %s smazán.</p>' % esc(name)))
+            else:
+                return self._html(page_dav("<p>404</p>"))
+            if err:
+                return self._html(page_dav('<p class="bad">%s</p>' % err))
+            return self._html(page_dav(
+                '<p class="ok">Účet <b>%s</b>, heslo <span class="mono">%s'
+                "</span> — ukáže se jen teď, zapiš si ho.</p>"
+                % (esc(name), esc(password))))
         if self.path == "/net/debug":
             want_on = form.get("value", "") == "on"
             try:

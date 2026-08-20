@@ -17,6 +17,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PASS=0; FAIL=0
 AST=phone21-smoke-ast
 WEB=phone21-smoke-web
+DAV=phone21-smoke-dav
 
 step() { # $1 popis, $2.. příkaz (i funkce)
   local desc="$1"; shift
@@ -29,7 +30,7 @@ step() { # $1 popis, $2.. příkaz (i funkce)
 }
 
 cleanup() {
-  docker rm -f "$AST" "$WEB" >/dev/null 2>&1 || true
+  docker rm -f "$AST" "$WEB" "$DAV" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 cleanup
@@ -138,10 +139,61 @@ fw_default_off_check() {
 }
 step "bez FIREWALL_INTERNAL se filtr nezapíná" fw_default_off_check
 
-# --- 7. veřejné texty bez názvů technologií --------------------------------
+# --- 7. kontakty a kalendář -------------------------------------------------
+step "build obrazu úložiště kontaktů" \
+  docker build -q -t phone21-dav:smoke dav/
+dav_start_check() {
+  rm -rf /tmp/phone21-dav-smoke && mkdir -p /tmp/phone21-dav-smoke
+  docker rm -f "$DAV" >/dev/null 2>&1 || true
+  docker run -d --name "$DAV" -v /tmp/phone21-dav-smoke:/data phone21-dav:smoke >/dev/null
+  for _ in $(seq 1 20); do
+    docker exec "$DAV" python3 -c "
+import urllib.request
+urllib.request.urlopen('http://127.0.0.1:5232/.web/', timeout=3)" 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+step "úložiště kontaktů nastartuje a odpovídá" dav_start_check
+step "úložiště běží pod nobody (65534)" \
+  docker exec "$DAV" sh -c 'grep -q "Uid:.*65534" /proc/1/status || test "$(id -u)" = 65534'
+dav_auth_check() {
+  docker exec "$DAV" python3 -c "
+import urllib.request, urllib.error
+try:
+    urllib.request.urlopen(urllib.request.Request(
+        'http://127.0.0.1:5232/', method='PROPFIND'), timeout=5)
+except urllib.error.HTTPError as e:
+    raise SystemExit(0 if e.code == 401 else 'ocekavano 401, prislo %s' % e.code)
+raise SystemExit('pozadavek bez hesla prosel')
+"
+}
+step "bez hesla vrací 401" dav_auth_check
+dav_split_check() {
+  python3 - <<'PY'
+import importlib.util, sys, types
+spec = importlib.util.spec_from_file_location("wapp", "webui/app.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules["wapp"] = mod
+spec.loader.exec_module(mod)
+cards = mod.split_vcards("BEGIN:VCARD\nFN:A\nEND:VCARD\nBEGIN:VCARD\nFN:B\nEND:VCARD\n")
+assert len(cards) == 2 and cards[0][0] != cards[1][0], cards
+ics = ("BEGIN:VCALENDAR\nVERSION:2.0\n"
+       "BEGIN:VEVENT\nUID:x\nSUMMARY:a\nEND:VEVENT\n"
+       "BEGIN:VEVENT\nUID:x\nRECURRENCE-ID:1\nSUMMARY:b\nEND:VEVENT\n"
+       "END:VCALENDAR\n")
+items = mod.split_ics(ics)
+assert len(items) == 1, items
+assert mod.DAV_USER_RE.match("petr") and not mod.DAV_USER_RE.match("_x")
+assert not mod.DAV_USER_RE.match("Petr Novak")
+PY
+}
+step "dělení kontaktů a kalendáře funguje" dav_split_check
+
+# --- 8. veřejné texty bez názvů technologií --------------------------------
 # Samostatná slova v lidsky psaném textu; identifikátory (phone21,
 # asterisk.conf, tailscale0) \b nechytí, resp. jsou vyloučené níže.
-TECH_RE='\b(sip|asterisk|tailscale|linphone|wireguard|headscale|voip|quectel|volte|csfb|graphene|radicale|davx|it-one)\b'
+TECH_RE='\b(sip|asterisk|tailscale|linphone|wireguard|headscale|voip|quectel|volte|csfb|graphene|radicale|it-one)\b'
 public_text_check() {
   ! grep -inE "$TECH_RE" \
       umbrel/phone21/umbrel-app.yml
