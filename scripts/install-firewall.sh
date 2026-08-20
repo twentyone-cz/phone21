@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 #
-# GSM2SIP — nasazení firewallu brány (scripts/firewall.nft) na LXC.
+# Phone21 — nasazení firewallu brány (scripts/firewall.nft) na LXC.
 #
-# Firewall, který si člověk nasazuje přes SSH, má jednu spolehlivou poruchu:
-# odřízne správu a není jak to vzít zpět. Proto se pravidla načtou na zkoušku
-# a zároveň se ozbrojí ROLLBACK TIMER — když se do GRACE sekund nepotvrdí
-# `--commit`, systemd tabulku sám smaže a přístup se vrátí. Timer běží
-# v systemd, ne v téhle shellové session: přežije i to, že SSH spadne.
+# Pravidla se načtou na zkoušku a ozbrojí se rollback timer v systemd:
+# když se do GRACE sekund nepotvrdí `--commit`, tabulka se sama smaže.
 #
 # Použití (na bráně, jako root):
 #   ./install-firewall.sh            # načte pravidla + ozbrojí rollback (5 min)
@@ -16,8 +13,7 @@
 #
 #   GRACE=600 ./install-firewall.sh  # delší okno na ověření
 #
-# Mezi načtením a `--commit` je potřeba OVĚŘIT, že správa žije — nová SSH
-# session (ne ta stávající, tu drží conntrack jako established) a web UI.
+# Mezi načtením a `--commit` ověř, že správa žije: NOVÁ SSH session a web UI.
 
 set -euo pipefail
 
@@ -91,8 +87,7 @@ install -m 644 "${SRC}" "${DST}"
 cat > "${UNIT}" <<EOF
 [Unit]
 Description=GSM2SIP firewall (nftables, tabulka inet gsm2sip)
-# Po dockeru a wg0 jen kvůli přehlednosti logů — tabulka je samostatná
-# a pravidla používají iifname, takže na existenci wg0 při startu nezávisí.
+# Po dockeru jen kvůli přehlednosti logů.
 After=network-pre.target docker.service wg-quick@wg0.service
 Wants=network-pre.target
 

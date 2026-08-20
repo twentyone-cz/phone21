@@ -2,7 +2,7 @@
 
 ## Android dovolí jen jednu VPN — jak vedle miniserveru provozovat komerční VPN?
 
-Android (i GrapheneOS) povolí jednu aktivní VPN na profil a aplikaci
+Android povolí jednu aktivní VPN na profil a aplikace
 privátní sítě to místo zabere. Obojí naráz proto nejde spustit vedle sebe.
 
 Co s tím:
@@ -33,27 +33,27 @@ a při odmítnutí zavěsí okamžitě — volající uslyší obsazeno a žádn
 notifikace o zmeškaném hovoru nepřijde. Když se to chová jinak, máš
 starou verzi.
 
-## Jedou hovory přes VoLTE?
+## Jedou hovory po datové síti?
 
-Ano, pokud to zvládne modem, SIM i síť. Ověření: během hovoru se telefon
-nesmí přepnout z LTE na 2G/3G. VoLTE je potřeba mít **aktivované na lince
-u operátora** — u některých se zapíná až po prvním připojení běžného
-telefonu, takže novou SIM je občas nutné jednou vložit do mobilu.
-Miniservery prodávané jako hotové řešení mají tuhle část vyřešenou
-z výroby.
+Ano, pokud to zvládne modem, SIM i síť. Ověření: během hovoru se
+miniserver nesmí přepnout do starší mobilní sítě. Hlas po datové síti je
+potřeba mít **aktivovaný na lince u operátora** — u některých se zapíná až
+po prvním připojení běžného telefonu, takže novou SIM je občas nutné
+jednou vložit do mobilu. Miniservery prodávané jako hotové řešení mají
+tuhle část vyřešenou z výroby.
 
 ## Ostrovní režim: co se stane, když během něj přijde hovor?
 
 Ostrovní režim je záloha internetu — když vypadne domácí linka,
 miniserver si vezme připojení z mobilních dat SIM. Pro hovory má smysl
-**jen s VoLTE**: hlas i data pak jedou po LTE současně, takže hovor
-projde i v ostrovním režimu.
+**jen s hlasem po datové síti**: hlas i data pak jedou současně, takže
+hovor projde i v ostrovním režimu.
 
-Bez VoLTE se hovor přepne do 2G (CSFB) a mobilní data po tu dobu nejedou.
-Prakticky to znamená, že v ostrovním režimu bez VoLTE hovor nedorazí —
-cesta k telefonu vede přes ta samá data. Miniserver to pozná, napíše to
-do logu a spojení po hovoru sám postaví znovu; SMS jdou po jiné cestě
-a fungují dál. Stav VoLTE vidíš v aplikaci u dlaždice mobilní sítě.
+Bez toho se hovor přepne do starší mobilní sítě a mobilní data po tu dobu
+nejedou. Prakticky to znamená, že v ostrovním režimu takový hovor
+nedorazí — cesta k telefonu vede přes ta samá data. Miniserver to pozná,
+napíše to do logu a spojení po hovoru sám postaví znovu; zprávy jdou po
+jiné cestě a fungují dál. Stav vidíš v ovládání u dlaždice mobilní sítě.
 
 ## Posílá aplikace do privátní sítě všechen provoz telefonu?
 
@@ -63,7 +63,10 @@ normálně mimo privátní síť a miniserver o tom nic neví.
 
 Obráceně to platí taky: miniserver nepustí provoz z privátní sítě dál do
 domácí sítě ani do internetu. Telefon se přes něj tedy nedostane nikam
-jinam než k němu samotnému — není to router ani výstupní uzel.
+jinam než k němu samotnému — není to router ani výstupní uzel. Od verze
+0.9.25 si to miniserver **sám vynucuje**: z privátní sítě přijímá jen to,
+co telefon potřebuje (hovory, zprávy, ovládání a párování telefonu),
+ostatní služby jsou z privátní sítě zavřené. Domácí sítě se to netýká.
 
 Výjimkou je, když si výstupní uzel zapneš sám (viz otázka o komerční VPN
 výš) — pak přes něj jde všechno, protože přesně o to jde.
@@ -82,3 +85,14 @@ vůbec nenabízí a omylem zapnout nejde.
 
 (Pokud používáš jinou VPN na celý provoz, téhle volby se to netýká —
 patří k té druhé aplikaci, ne k Phone21.)
+
+## Potřebuju se k miniserveru dostat na dálku kvůli servisu
+
+Od verze 0.9.25 je vzdálená správa z privátní sítě **standardně zavřená**.
+Když je potřeba (servisní zásah, ladění), zapni ji v ovládání na záložce
+**Síť** přepínačem „Povolit ladění" — projeví se do 15 s, přežije restart
+a na dashboardu ji připomíná dlaždice. Po skončení práce ji zase vypni.
+
+Kdyby se filtr zachoval nečekaně, jde vypnout i z domácí sítě: do souboru
+`firewall.env` v datovém adresáři aplikace přidej řádek `FW_DISABLE=1`.
+Do minuty se filtr vypne a miniserver jede dál.

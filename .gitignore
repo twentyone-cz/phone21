@@ -3,23 +3,13 @@
 runtime/
 __pycache__/
 
-# Interní: konkrétní nasazení, provozní zápisky a handoffy mezi projekty.
-# Obecná dokumentace (jak to funguje, návody) do repa PATŘÍ — viz docs/*.md.
-docs/lxc-deploy.md
-docs/cockscale-integrace.md
-docs/vyvoj-log.md
-docs/telefon-gos.md
-docs/technicke-poznamky.md
+# Dokumentace: veřejná jsou jen tahle dvě áčka, zbytek docs/ je interní.
+docs/*
+!docs/faq.md
+!docs/telefon.md
 
 # Android build (APK a gradle cache se do repa nedávají)
 android/dialer/.gradle/
 android/dialer/build/
 android/dialer/app/build/
 android/dialer/local.properties
-
-# Interní: plán přejmenování identifikátorů (obsahuje detaily nasazení)
-docs/prejmenovani-identifikatoru.md
-
-# Interní: vydávací proces (odkazuje na interní infrastrukturu)
-docs/release.md
-docs/bt-auto-review.md

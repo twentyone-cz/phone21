@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Odmítne commit zprávu s názvem technologie nebo s interní identitou.
+# Identifikátory (gsm2sip, asterisk.conf, tailscale0) projdou.
+msg="$1"
+BAD='\b(sip|asterisk\w*|tailscale\w*|linphon\w*|wireguard\w*|headscale\w*|voip|quectel\w*|volte|csfb|graphene\w*|radicale|davx|it-one|10\.249)\b'
+if grep -inE "$BAD" "$msg" | grep -vE '(asterisk|webui|scripts|docker|dav)/|gsm2sip|asterisk\.conf|tailscale0|volte_state'; then
+  echo "commit-msg: v předmětu/těle je název technologie nebo interní identita (viz výše)." >&2
+  echo "            Přeformuluj (ústředna, privátní síť, aplikace, hlas po datové síti…)." >&2
+  exit 1
+fi
+exit 0
