@@ -47,9 +47,8 @@ ACCOUNT_LABEL = os.environ.get("ACCOUNT_LABEL", "myGSM")
 # "gui" = spotřebitelský dashboard (Umbrel appka) s technikou pod Pokročilé.
 UI_MODE = os.environ.get("UI_MODE", "expert")
 GUI = UI_MODE == "gui"
-# Provisioning pro softphone: běží na vlastním portu BEZ hesla (jinak by si
-# Linphone konfiguraci nestáhl) — chrání ho jednorázový token s krátkou
-# platností. Port se publikuje přímo, ne přes proxy s přihlášením.
+# Nastavení telefonu: běží na vlastním portu bez hesla, chrání ho
+# jednorázový token s krátkou platností.
 PROV_PORT = int(os.environ.get("PROV_PORT", "8091"))
 # Prefix pro interní odkazy (kdyby UI běželo za proxy pod cestou)
 BASE = os.environ.get("BASE_PATH", "").rstrip("/")
@@ -220,6 +219,28 @@ def partner_token_path():
     return os.path.join(STATE_DIR, "partner_token")
 
 
+def debug_ssh_path():
+    return os.path.join(STATE_DIR, "debug_ssh")
+
+
+def debug_ssh_on():
+    """Je zapnuté ladění (vzdálená správa z privátní sítě)?"""
+    try:
+        with open(debug_ssh_path()) as f:
+            return f.read().strip() == "1"
+    except OSError:
+        return False
+
+
+def firewall_state():
+    """Stav filtru z privátní sítě, jak ho zapisuje ústředna."""
+    try:
+        with open(os.path.join(DATA_DIR, "firewall")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def write_state(path, data):
     """Atomický zápis stavu (0600, tmp+rename). Volající chytá OSError —
     na instalaci bez rw mountu STATE_DIR zápis selže a uživatel musí dostat
@@ -234,7 +255,7 @@ def write_state(path, data):
 
 def audit(msg):
     """Bezpečnostní události do stdout (docker logs) — přihlášení, 2FA,
-    AT příkazy. Bez tohohle se po incidentu nedá zrekonstruovat vůbec nic."""
+    servisní příkazy."""
     print("[audit] %s %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg),
           flush=True)
 
@@ -288,7 +309,7 @@ def request_network_key():
 
 
 def prov_xml(domain, ts_url="", ts_key=""):
-    """Konfigurace účtu pro Linphone (remote provisioning)."""
+    """Konfigurace účtu pro aplikaci v telefonu."""
     sec = read_secrets()
     user = sec.get("SIP_USER", SIP_USER)
     password = sec.get("SIP_PASSWORD", "")
@@ -366,8 +387,7 @@ def get_island_mode():
 
 
 def volte_state():
-    """registered / not-registered / unknown — plní ho asterisk kontejner
-    (qmicli --imsa-get-ims-registration-status) každou minutu."""
+    """registered / not-registered / unknown — stav plní kontejner ústředny."""
     try:
         val = open(os.path.join(DATA_DIR, "volte")).read().strip()
     except OSError:
@@ -737,7 +757,7 @@ def page_home(info=""):
             "\U0001F4F6", "Mobilní síť", "Připojeno", "ok",
             "%s · %s%s · signál %s" % (esc(m.get("Provider Name", "?")),
                                        esc(m.get("Access technology", "?")),
-                                       " + VoLTE" if volte_state() == "registered"
+                                       " + hlas po datové síti" if volte_state() == "registered"
                                        else "",
                                        esc(signal_percent(m.get("RSSI"))))))
     elif m and m.get("State"):
@@ -783,6 +803,12 @@ def page_home(info=""):
            " · <b>čeká na doručení: %d</b>" % waiting if waiting else "",
            u("/sms"))))
 
+    if debug_ssh_on():
+        tiles.append(_tile(
+            "\U0001F527", "Ladění", "Zapnuto", "warn",
+            "vzdálená správa z privátní sítě je otevřená · "
+            '<a href="%s">vypnout</a>' % u("/net")))
+
     calls = read_cdr(limit=1)
     tiles.append(_tile(
         "\U0001F4DE", "Hovory",
@@ -806,11 +832,11 @@ def page_home(info=""):
     island = get_island_mode()
     volte = volte_state()
     if volte == "registered":
-        islandnote = ('<p class="muted"><span class="dot ok"></span>Modem má '
-                      "VoLTE, takže data jedou i během hovoru.</p>")
+        islandnote = ('<p class="muted"><span class="dot ok"></span>Modem umí '
+                      "hlas po datové síti, takže data jedou i během hovoru.</p>")
     elif volte == "not-registered":
         islandnote = ('<p class="muted"><span class="dot warn"></span>Modem '
-                      "teď nemá VoLTE. Náhradní připojení proto během hovoru "
+                      "teď hlas po datové síti nemá. Náhradní připojení proto během hovoru "
                       "vypadne a naskočí až po jeho skončení — jako záloha "
                       "pro krátké výpadky to stačí, na hovory v ostrovním "
                       "režimu spoléhat nejde.</p>")
@@ -845,8 +871,6 @@ def page_status(mode_info=""):
     """Expert režim = domovská stránka, GUI režim = záložka Pokročilé.
     Nastavení (zmeškané hovory, ostrovní režim) žije v GUI na dashboardu,
     tady se v GUI neopakuje."""
-    dev = cli("quectel show devices")
-    state = cli("quectel show device state " + DEVICE)
     contacts = cli("pjsip show contacts")
     chans = cli("core show channels")
     q = read_queue()
@@ -857,17 +881,40 @@ def page_status(mode_info=""):
     wdblock = ("<pre>%s</pre>" % esc("\n".join(wd))) if wd else \
         '<p><span class="ok"><span class="dot ok"></span>watchdog zatím nikdy ' \
         "nezasáhl</span></p>"
+    m = modem_summary() or {}
+    phones = sum(1 for ln in contacts.splitlines() if "Avail" in ln)
+    active = ""
+    for ln in chans.splitlines():
+        if "active channel" in ln:
+            active = ln.strip()
+    rows = [
+        ("Mobilní síť", "%s · %s · signál %s" % (
+            esc(m.get("Provider Name", "?")),
+            esc(m.get("Access technology", "?")),
+            esc(signal_percent(m.get("RSSI"))))),
+        ("Stav modemu", esc(m.get("State") or "nezjištěno")),
+        ("Hlas po datové síti", esc(volte_state())),
+        ("Telefon připojen", "ano (%d)" % phones if phones else "ne"),
+        ("Probíhající hovory", esc(active) or "žádné"),
+    ]
+    summary = "<table>%s</table>" % "".join(
+        "<tr><th>%s</th><td>%s</td></tr>" % r for r in rows)
     body = (
         "<h1>%s</h1>"
-        "<h2>Modem</h2><pre>%s</pre>"
-        "<h2>Detail zařízení</h2><pre>%s</pre>"
-        "<h2>Připojení telefonu</h2><pre>%s</pre>"
-        "<h2>Hovory</h2><pre>%s</pre>"
+        "<h2>Přehled</h2>%s"
         "<h2>SMS fronta</h2><p>%s</p>"
-        "<h2>Watchdog modemu</h2>%s"
-    ) % ("Pokročilé" if GUI else "Stav brány",
-         esc(dev), esc(state), esc(contacts), esc(chans), qbadge, wdblock)
+        "<h2>Hlídka modemu</h2>%s"
+    ) % ("Pokročilé" if GUI else "Stav miniserveru", summary, qbadge, wdblock)
     if not GUI:
+        # Technické výpisy jen v expert režimu.
+        body += (
+            "<h2>Modem</h2><pre>%s</pre>"
+            "<h2>Detail zařízení</h2><pre>%s</pre>"
+            "<h2>Připojení telefonu</h2><pre>%s</pre>"
+            "<h2>Kanály</h2><pre>%s</pre>"
+        ) % (esc(cli("quectel show devices")),
+             esc(cli("quectel show device state " + DEVICE)),
+             esc(contacts), esc(chans))
         mode = get_missed_mode()
         island = get_island_mode()
         body += (
@@ -891,11 +938,11 @@ def page_status(mode_info=""):
              _choice("island", "on", island, "Zapnuto",
                      "při výpadku linky default route přes datové rozhraní "
                      "modemu (data se účtují)"))
-        body += ('<p class="muted">IMS/VoLTE: <b>%s</b>%s</p>' % (
+        body += ('<p class="muted">Hlas po datové síti: <b>%s</b>%s</p>' % (
             esc(volte_state()),
             "" if volte_state() == "registered" else
-            " — bez VoLTE jde hovor CSFB do 2G a datové spojení na tu dobu "
-            "padá; hlídka ho po hovoru postaví znovu."))
+            " — bez něj přepne modem hovor do starší sítě a datové spojení "
+            "na tu dobu padá; hlídka ho po hovoru postaví znovu."))
     body += '<p><button class="ghost" onclick="location.reload()">Obnovit</button></p>'
     return render("status", body)
 
@@ -978,11 +1025,36 @@ def page_net(info=""):
         % (esc(dash), esc(dash),
            "token uložen" if have_partner else "token zatím není",
            u("/net/partner")))
+    fw = firewall_state()
+    if fw:
+        dbg = debug_ssh_on()
+        if fw.startswith("active"):
+            fw_txt = "zapnutý — z privátní sítě projde jen telefonování a ovládání"
+            fw_cls = "ok"
+        elif fw.startswith("disabled"):
+            fw_txt = "vypnutý souborem firewall.env"
+            fw_cls = "warn"
+        else:
+            fw_txt = "CHYBA — z privátní sítě je miniserver otevřený"
+            fw_cls = "bad"
+        blocks.append(
+            "<h2>Ladění přes privátní síť</h2>"
+            '<p class="small muted">Filtr provozu: <span class="%s">%s</span></p>'
+            "<p>Otevře vzdálenou správu miniserveru z privátní sítě (bez "
+            "omezení na konkrétní zařízení). Projeví se do 15 s a přežije "
+            "restart — po skončení práce vypni.</p>"
+            '<p>Stav: <b>%s</b></p>'
+            '<form class="inline" method="post" action="%s">'
+            '<input type="hidden" name="value" value="%s">'
+            "<button>%s</button></form>"
+            % (fw_cls, esc(fw_txt), "zapnuto" if dbg else "vypnuto",
+               u("/net/debug"), "off" if dbg else "on",
+               "Vypnout ladění" if dbg else "Povolit ladění"))
     return render("net", "".join(blocks))
 
 
 def page_phone(info=""):
-    """Připojení softphonu: QR pro Linphone + ruční údaje."""
+    """Připojení telefonu: QR kód + ruční údaje."""
     sec = read_secrets()
     ip = ts_ip()
     blocks = [info, "<h1>Telefon</h1>"]
@@ -1030,9 +1102,7 @@ def page_phone(info=""):
 
 
 def page_qr(url):
-    """QR s odkazem na konfiguraci. Kód nese schéma linphone-config:, které
-    otevře appku rovnou — přečte ho i vestavěný skener Linphonu i systémový
-    fotoaparát (ověřeno na GrapheneOS i Samsungu)."""
+    """QR s odkazem na konfiguraci; kód otevře aplikaci rovnou."""
     body = """<h1>Připojení telefonu</h1>
 <p>Nejdřív si v telefonu nainstaluj aplikaci <b>Phone21</b>. Pak naskenuj kód —
 buď skenerem v aplikaci (Přidat účet → <b>Scan QR code</b>), nebo běžným
@@ -1061,12 +1131,12 @@ new QRCode(document.getElementById("qr"), {text: %s, width: 280, height: 280,
 
 def page_diag(at_info=""):
     return render("diag", (
-        "%s<h2>AT příkaz</h2>"
+        "%s<h2>Servisní příkaz modemu</h2>"
         '<form class="inline" method="post" action="' + u("/diag/at") + '">'
-        '<input name="cmd" placeholder="AT+CSQ" required size="30">'
+        '<input name="cmd" required size="30">'
         "<button>Poslat</button></form>"
-        "<small>Odpověď dorazí asynchronně — objeví se v logu níže "
-        "(Got Response). Pozor, některé AT příkazy modem rozbijí.</small>"
+        "<small>Odpověď dorazí se zpožděním a objeví se v záznamu níže. "
+        "Pozor, některé servisní příkazy modem rozbijí.</small>"
         "<h2>Záznam telefonní části</h2><pre>%s</pre>"
         '<p><button onclick="location.reload()">Obnovit</button></p>'
     ) % (at_info, esc(tail_log())))
@@ -1301,7 +1371,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/net" and TS_DIR:
             return self._html(page_net())
         if self.path == "/diag":
-            return self._html(page_diag())
+            # technický záznam jen v expert režimu
+            return self._html(page_diag() if not GUI else page_status())
         self._html("<p>404</p>", 404)
 
     def do_POST(self):
@@ -1474,15 +1545,35 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 info = '<p class="bad">[OVL-E14] Nejde uložit token: %s</p>' % esc(e)
             return self._html(page_net(info))
+        if self.path == "/net/debug":
+            want_on = form.get("value", "") == "on"
+            try:
+                if want_on:
+                    write_state(debug_ssh_path(), "1")
+                    info = ('<p class="ok">Ladění zapnuto — vzdálená správa '
+                            "z privátní sítě bude otevřená do 15 s.</p>")
+                else:
+                    try:
+                        os.remove(debug_ssh_path())
+                    except FileNotFoundError:
+                        pass
+                    info = ('<p class="ok">Ladění vypnuto — vzdálená správa '
+                            "se do 15 s zavře.</p>")
+                audit("net/debug ip=%s value=%s" % (self.client_address[0],
+                                                    "on" if want_on else "off"))
+            except OSError as e:
+                info = ('<p class="bad">[OVL-E23] Nejde uložit volbu ladění: '
+                        "%s</p>" % esc(e))
+            return self._html(page_net(info))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
-            # Řídicí znaky (CR/LF) by z jednoho AT příkazu udělaly injekci
-            # dalších AMI akcí — příkaz jde přes AMI Command jako text.
+            # Řídicí znaky (CR/LF) by z jednoho příkazu udělaly injekci
+            # dalších akcí — příkaz jde do ústředny jako text.
             if (not cmd.upper().startswith("AT")
                     or "CUSBPIDSWITCH" in cmd.upper()
                     or len(cmd) > 128
                     or any(ord(c) < 32 or ord(c) == 127 for c in cmd)):
-                return self._html(page_diag('<p class="bad">[OVL-E15] Povolené jsou jen AT příkazy (max 128 znaků, bez řídicích znaků; CUSBPIDSWITCH nikdy).</p>'))
+                return self._html(page_diag('<p class="bad">[OVL-E15] Povolené jsou jen servisní příkazy modemu (max 128 znaků, bez řídicích znaků).</p>'))
             audit("diag/at ip=%s cmd=%r" % (self.client_address[0], cmd))
             out = cli("quectel cmd %s %s" % (DEVICE, cmd))
             return self._html(page_diag('<p class="ok">%s</p>' % esc(out)))
@@ -1510,7 +1601,7 @@ class Handler(BaseHTTPRequestHandler):
 
 class ProvHandler(BaseHTTPRequestHandler):
     """Jediný účel: vydat konfiguraci softphonu na jednorázový token.
-    Běží bez hesla (Linphone se neumí přihlásit), takže nic jiného neobsluhuje."""
+    Běží bez hesla, takže nic jiného neobsluhuje."""
     server_version = "gsm2sip-prov"
 
     def log_message(self, fmt, *args):

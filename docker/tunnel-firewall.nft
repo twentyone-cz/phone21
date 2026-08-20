@@ -1,0 +1,55 @@
+#!/usr/sbin/nft -f
+#
+# Phone21 — filtr provozu přicházejícího z privátní sítě.
+# Ostatní rozhraní (domácí síť, lokální smyčka) tenhle soubor neřeší.
+
+define TUN_IF    = "tailscale0"
+define SIP_PORT  = 5060
+define RTP_PORTS = 10000-10100
+define TUN_TCP   = { 8090, 8091, 5232 }
+
+# Idempotence: tabulku vyrob prázdnou, smaž a nadefinuj.
+table inet phone21 {}
+delete table inet phone21
+
+table inet phone21 {
+
+  # Prázdný řetěz; pravidlo pro vzdálenou správu do něj přidává
+  # tunnel-firewall.sh, když je v ovládání zapnuté ladění.
+  chain tun_debug {
+  }
+
+  # Provoz z privátní sítě do miniserveru.
+  chain tun_in {
+    ct state established,related accept
+    ct state invalid drop
+    meta l4proto { icmp, ipv6-icmp } accept
+    udp dport $SIP_PORT counter accept
+    tcp dport $SIP_PORT counter accept
+    udp dport $RTP_PORTS counter accept
+    tcp dport $TUN_TCP counter accept
+    jump tun_debug
+    limit rate 5/minute burst 5 packets log prefix "phone21-fw in: "
+    counter drop
+  }
+
+  # Provoz z privátní sítě dál (do kontejnerů a do domácí sítě).
+  # Publikované porty sem přijdou po překladu adresy.
+  chain tun_fwd {
+    ct state established,related accept
+    ct state invalid drop
+    ct status dnat tcp dport $TUN_TCP counter accept
+    limit rate 5/minute burst 5 packets log prefix "phone21-fw fwd: "
+    counter drop
+  }
+
+  chain input {
+    type filter hook input priority filter; policy accept;
+    iifname $TUN_IF jump tun_in
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+    iifname $TUN_IF jump tun_fwd
+  }
+}

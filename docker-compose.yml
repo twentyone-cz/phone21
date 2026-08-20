@@ -1,4 +1,4 @@
-# GSM2SIP — brána: Asterisk + ovladač LTE modemu
+# Phone21 — miniserver: ústředna + ovladač LTE modemu
 #
 # Před prvním startem: cp .env.example .env, doplnit hodnoty, spustit ./configure.sh
 # (vygeneruje konfiguraci do ${ASTERISK_CONF_DIR}, default ./runtime/asterisk).
@@ -7,56 +7,50 @@
 # Po odpojení/zapojení modemu je potřeba kontejner restartovat.
 #
 # Zařízení modemu jdou dovnitř bind mountem + device_cgroup_rules, ne přes
-# `devices:` — na LXC bez udev nejsou /dev/serial/by-id symlinky a `devices:`
-# s neexistujícím (nebo placeholder) souborem zabrání už VYTVOŘENÍ kontejneru.
-# Bind mount projde vždy: bez modemu kontejner nastartuje v bezmodemovém
-# režimu (ovladač jen opakuje open — pro smoke testy webui/dialplanu stačí).
+# `devices:` (důvody v technických poznámkách).
 
 services:
   asterisk:
     # Vlastní image (viz docker/). První start: docker compose build.
     # Override image: ASTERISK_IMAGE v .env.
     image: ${ASTERISK_IMAGE:-gsm2sip-asterisk:local}
-    # context = kořen repa: Dockerfile peče i asterisk/ šablony a scripts/
-    # (selfkonfigurace pro Umbrel; LXC režim se nemění — viz entrypoint.sh)
+    # context = kořen repa: Dockerfile peče i šablony a skripty
     build:
       context: .
       dockerfile: docker/Dockerfile
     container_name: asterisk
-    network_mode: host          # RTP = široký rozsah UDP portů, žádný port mapping
+    network_mode: host          # široký rozsah UDP portů pro hovory
     restart: unless-stopped
-    # zdraví = CLI socket ústředny odpovídá (jen diagnostika pro docker ps;
-    # restart policy na unhealthy nereaguje, restarty řeší watchdog na hostu)
+    # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
     healthcheck:
-      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
     environment:
-      TZ: Europe/Prague       # jinak kontejner loguje v UTC (2h posun proti realitě)
+      TZ: Europe/Prague       # čas v logu
     group_add:
-      - "20"                    # dialout (root:dialout 0660 na ttyUSB) — Asterisk neběží jako root
+      - "20"                    # dialout (sériové porty modemu)
     device_cgroup_rules:
       - "c 188:* rwm"             # usb-serial (ttyUSB*)
-      - "c 180:* rwm"             # cdc-wdm (QMI)
+      - "c 180:* rwm"             # datové rozhraní modemu
     volumes:
       - ${ASTERISK_CONF_DIR:-./runtime/asterisk}:/etc/asterisk
       - ./scripts:/usr/local/gsm2sip:ro          # sms-queue.sh (žurnál+retry)
       - ./runtime/smsdata:/var/lib/gsm2sip       # žurnál, fronta, smsdb (persistentní)
       - ./runtime/spool:/var/spool/asterisk/outgoing  # naplánované retry (call files)
       - ./runtime/astlog:/var/log/asterisk       # messages.log pro web UI
-      - /dev/ttyUSB2:/dev/ttyUSB2                # AT port modemu
-      - /dev/ttyUSB4:/dev/ttyUSB4                # audio port modemu
-      - /dev/cdc-wdm0:/dev/cdc-wdm0              # QMI (VoLTE MBN profil)
+      - /dev/ttyUSB2:/dev/ttyUSB2                # servisní port modemu
+      - /dev/ttyUSB4:/dev/ttyUSB4                # zvukový port modemu
+      - /dev/cdc-wdm0:/dev/cdc-wdm0              # datové rozhraní modemu
 
   webui:
     build: ./webui
     container_name: gsm2sip-webui
-    network_mode: host          # AMI na 127.0.0.1; UI poslouchá na :8090 (jen LAN/WG!)
+    network_mode: host          # ovládání poslouchá na :8090 (jen domácí síť)
     restart: unless-stopped
-    # zdraví = přihlašovací stránka odpovídá; curl v obraze není,
-    # kontrola jde přes python (stdlib)
+    # zdraví = přihlašovací stránka odpovídá
     healthcheck:
       test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
       interval: 30s
@@ -72,10 +66,9 @@ services:
       WEBUI_PORT: ${WEBUI_PORT:-8090}
       SIP_USER: ${SIP_USER}
       SIP_DOMAIN: ${SIP_DOMAIN}
-      COUNTRY_CODE: ${COUNTRY_CODE:-420}  # normalizace čísel na E.164 (viz dialplan)
+      COUNTRY_CODE: ${COUNTRY_CODE:-420}  # normalizace čísel na mezinárodní tvar
     volumes:
       - ./runtime/smsdata:/var/lib/gsm2sip:ro
-      # stav ovládání (tajemství 2FA, token brány) — jediné místo, kam webui
-      # zapisuje; zbytek dat je pro něj jen ke čtení
+      # stav ovládání (2FA, token) — jediné místo, kam ovládání zapisuje
       - ./runtime/smsdata/webui:/var/lib/gsm2sip/webui:rw
       - ./runtime/astlog:/var/log/asterisk:ro

@@ -12,6 +12,8 @@
 #   MBN_INTERNAL=1       držení MBN carrier profilu (VoLTE), potřeba
 #                        /dev/cdc-wdm0 v devices
 #   SUPERVISE=1          restart Asterisku po pádu/watchdogu (smyčka)
+#   FIREWALL_INTERNAL=1  filtr provozu přicházejícího z privátní sítě
+#                        (potřebuje NET_ADMIN a síť hostitele)
 #
 # SIP_DOMAIN: pevná hodnota z env, nebo prázdná → čeká se (max TS_WAIT s)
 # na /var/lib/gsm2sip/ts/ip od tailscale sidecaru (tailnet IP brány).
@@ -22,7 +24,37 @@ DATA=/var/lib/gsm2sip
 SECRETS="$DATA/secrets.env"
 TS_IP_FILE="$DATA/ts/ip"
 
+AST_PIDFILE=/run/asterisk-main.pid
+
 log() { echo "[entrypoint] $*"; }
+
+# PID hlavního procesu ústředny (z PID souboru, jinak z tabulky procesů —
+# `asterisk -rx` spouští stejnojmenného klienta, proto shoda na celý řádek)
+ast_pid() {
+  local p
+  p="$(cat "$AST_PIDFILE" 2>/dev/null || true)"
+  if [[ -n "$p" && -d "/proc/$p" ]]; then printf '%s' "$p"; return 0; fi
+  pgrep -f 'asterisk -f -U asterisk' 2>/dev/null | head -1
+}
+
+# Ukončení ústředny: SIGTERM, a když se do 15 s neukončí, SIGKILL.
+# Restart pak obstará smyčka SUPERVISE (nebo Docker).
+ast_stop() {
+  local pid waited=0
+  pid="$(ast_pid)"
+  [[ -n "$pid" ]] || { log "ústředna neběží — není co ukončovat"; return 0; }
+  log "ukončuji ústřednu (PID $pid)"
+  kill -TERM "$pid" 2>/dev/null || true
+  while [[ -d "/proc/$pid" && $waited -lt 15 ]]; do sleep 1; waited=$((waited + 1)); done
+  if [[ -d "/proc/$pid" ]]; then
+    log "POZOR: ústředna se neukončila do 15 s — posílám SIGKILL"
+    kill -KILL "$pid" 2>/dev/null || true
+    waited=0
+    while [[ -d "/proc/$pid" && $waited -lt 10 ]]; do sleep 1; waited=$((waited + 1)); done
+  fi
+  [[ -d "/proc/$pid" ]] && { log "POZOR: PID $pid stále žije"; return 1; }
+  return 0
+}
 
 render() {
   mkdir -p "$DATA"
@@ -94,26 +126,18 @@ render() {
 # dřív žila v render() a na nasazeních bez GSM2SIP_SELFCONFIG se nikdy
 # neprovedla).
 #
-# Web UI běží pod jiným uživatelem než Asterisk (na Umbrelu nobody):
-# data musí umět přečíst (fronta, žurnál) a do ts/ a webui/ i zapsat.
-# Obsah zpráv a fronta nesmí být čitelné pro „ostatní" — čte je jen
-# ústředna (vlastník) a ovládání (skupina nobody). Šifrování na disku
-# nedává smysl: klíč by ležel hned vedle; skutečná ochrana dat v klidu
-# je šifrovaný disk hostitele.
+# Ovládání běží pod jiným uživatelem než ústředna: data musí umět přečíst
+# a do ts/ a webui/ i zapsat. Zprávy a fronta nejsou čitelné pro ostatní.
 common_setup() {
-  # Čas v logu: ústředna čte /etc/localtime, proměnnou TZ ne — bez tohohle
-  # by messages.log i historie hovorů běžely v UTC a mátly diagnostiku.
+  # Čas v logu: ústředna čte /etc/localtime, proměnnou TZ ne.
   if [[ -n "${TZ:-}" && -e "/usr/share/zoneinfo/$TZ" ]]; then
     ln -sfn "/usr/share/zoneinfo/$TZ" /etc/localtime 2>/dev/null || true
     printf '%s\n' "$TZ" > /etc/timezone 2>/dev/null || true
   fi
   mkdir -p "$DATA/queue" "$DATA/ts" "$DATA/webui"
-  # vlastníkem dat je ústředna (bez selfconfigu render nechown-uje a volume
-  # založený rootem by byl pro uživatele asterisk neprůchozí — astdb!)
+  # vlastníkem dat je ústředna
   chown asterisk "$DATA" "$DATA/queue" 2>/dev/null || true
-  # setgid (2750/2770): soubory založené ústřednou (žurnál, fronta) dědí
-  # skupinu ovládání — bez toho by každá SMS vytvořila soubor se skupinou
-  # asterisk a ovládání by ho nepřečetlo
+  # setgid (2750/2770): soubory od ústředny dědí skupinu ovládání
   chgrp 65534 "$DATA" "$DATA/queue" 2>/dev/null || true
   chmod 2750 "$DATA" "$DATA/queue" 2>/dev/null || true
   chgrp 65534 "$DATA/ts" 2>/dev/null || true
@@ -124,14 +148,11 @@ common_setup() {
   chgrp 65534 "$DATA/journal.jsonl" 2>/dev/null || true
   chmod 0640 "$DATA/journal.jsonl" 2>/dev/null || true
   find "$DATA/queue" -type f -exec chgrp 65534 {} + -exec chmod 0640 {} + 2>/dev/null || true
-  # log Asterisku (volume bývá založený rootem — bez tohohle se nezapisuje
-  # a Diagnostika ve web UI zůstane prázdná)
+  # log ústředny
   chown -R asterisk /var/log/asterisk 2>/dev/null || \
     chmod 0777 /var/log/asterisk 2>/dev/null || true
   chmod 0644 /var/log/asterisk/messages.log 2>/dev/null || true
-  # historie hovorů: cdr_csv píše do astlogdir/cdr-csv, ale bind-mount přes
-  # /var/log/asterisk ten adresář z obrazu zakryje — bez založení tady by
-  # se CDR nikdy nezapsalo (a stránka Hovory by tiše zůstala prázdná)
+  # historie hovorů: adresář musí existovat, jinak se nezapíše
   mkdir -p /var/log/asterisk/cdr-csv
   touch /var/log/asterisk/cdr-csv/Master.csv 2>/dev/null || true
   chown -R asterisk /var/log/asterisk/cdr-csv 2>/dev/null || true
@@ -141,18 +162,36 @@ common_setup() {
 }
 
 watchdog_loop() {
-  local fails=0 thr="${FAIL_THRESHOLD:-3}" interval="${WATCHDOG_INTERVAL:-30}"
+  local fails=0 stuck=0 thr="${FAIL_THRESHOLD:-3}" interval="${WATCHDOG_INTERVAL:-30}"
+  local out state
   sleep 120  # po startu má modem čas na inicializaci
   while true; do
+    # ústředna zaseknutá ve vypínání: CLI odpovídá, ale nic nedělá —
+    # graceful cesta už neexistuje, jediné gesto je zabít proces
+    out="$(asterisk -rx 'core show uptime' 2>&1)"
+    if [[ "$out" == *"during shutdown"* ]]; then
+      stuck=$((stuck + 1))
+      log "watchdog: ústředna visí ve vypínání ($stuck/2)"
+      if [[ $stuck -ge 2 ]]; then
+        ast_stop || true
+        stuck=0; fails=0
+        sleep 120
+        continue
+      fi
+      sleep "$interval"
+      continue
+    fi
+    stuck=0
     state="$(asterisk -rx 'quectel show device state quectel0' 2>/dev/null | awk '/State/{print $3}')"
     if [[ -z "$state" || "$state" == "Not" ]]; then
       fails=$((fails + 1))
       log "watchdog: modem nezdravý ($fails/$thr)"
       if [[ $fails -ge $thr ]]; then
-        log "watchdog: restartuji Asterisk"
-        asterisk -rx 'core stop now' 2>/dev/null || true
+        log "watchdog: restartuji ústřednu"
+        ast_stop || true
         fails=0
-        sleep 60
+        sleep 120
+        continue
       fi
     else
       fails=0
@@ -161,9 +200,8 @@ watchdog_loop() {
   done
 }
 
-# Na hostiteli si QMI rozhraní modemu obvykle zabere ModemManager — pak
-# selže správa carrier profilu i ostrovní režim. Zastavíme ho přes systemd
-# D-Bus (socket musí být namountovaný); bez socketu se jen tiše přeskočí.
+# Uvolnění datového rozhraní modemu přes systemd D-Bus (bez socketu se
+# krok přeskočí).
 mm_release() {
   [[ -S /run/dbus/system_bus_socket ]] || return 0
   command -v dbus-send >/dev/null || return 0
@@ -176,8 +214,7 @@ mm_release() {
 
 qmi_ok() { timeout 15 qmicli -d /dev/cdc-wdm0 --dms-get-model >/dev/null 2>&1; }
 
-# QMI umí po cizím klientovi zůstat zaseknuté (endpoint hangup) — pak pomůže
-# jen reset modemu. Po resetu se USB znovu vyčísluje, chvíli to trvá.
+# Probrání zaseknutého datového rozhraní modemu (v krajním případě reset).
 qmi_recover() {
   qmi_ok && return 0
   mm_release
@@ -193,8 +230,7 @@ qmi_recover() {
   return 1
 }
 
-# Stav IMS (VoLTE) pro ostatní části appky: bez něj hovor shodí datové
-# spojení (CSFB přepne modem do 2G), což je pro ostrovní režim zásadní.
+# Stav hlasu po datové síti pro ostatní části aplikace.
 volte_probe() {
   local out
   out="$(timeout 15 qmicli -d /dev/cdc-wdm0 --imsa-get-ims-registration-status 2>/dev/null)" || return 1
@@ -213,11 +249,8 @@ mbn_loop() {
     if [[ -c /dev/cdc-wdm0 ]]; then
       # profil se řeší jednou za 10 minut, IMS stav každou minutu (levné)
       if [[ $((n % 10)) -eq 0 ]]; then
-        # mapa operátor→profil jde dodat i souborem mbn.env v datovém
-        # adresáři (přežije update aplikace); čte se před každou volbou.
-        # Soubor se NIKDY nespouští (žádný source — běžíme jako root),
-        # berou se z něj jen hodnoty řádků MBN_PROFILE=/MBN_MAP=;
-        # případné "uvozovky" kolem hodnoty se odloupnou.
+        # mapu operátor→profil lze dodat souborem mbn.env v datovém
+        # adresáři; soubor se jen čte, nikdy nespouští
         if [[ -f "$DATA/mbn.env" ]]; then
           mbn_v="$(sed -n 's/^MBN_PROFILE=//p' "$DATA/mbn.env" 2>/dev/null | tail -1)"
           mbn_v="${mbn_v%\"}"; mbn_v="${mbn_v#\"}"
@@ -239,6 +272,14 @@ mbn_loop() {
   done
 }
 
+# Filtr provozu z privátní sítě. Nikdy nesmí zabránit startu ústředny —
+# při selhání jen hlásí a jede se dál.
+if [[ "${FIREWALL_INTERNAL:-0}" == "1" ]]; then
+  /opt/gsm2sip/scripts/tunnel-firewall.sh apply \
+    || log "POZOR: filtr privátní sítě selhal — miniserver je z privátní sítě OTEVŘENÝ"
+  /opt/gsm2sip/scripts/tunnel-firewall.sh watch &
+fi
+
 if [[ "${GSM2SIP_SELFCONFIG:-0}" == "1" ]]; then
   render
 fi
@@ -258,9 +299,7 @@ island_default() {
 island_default &
 /opt/gsm2sip/scripts/wwan.sh watch &
 
-# Adresa v domácí síti pro QR telefonu. Zapisuje ji tenhle kontejner,
-# protože běží v síti hostitele — webui je za mostem dockeru a viděl by
-# jen jeho vnitřní adresu (10.21.x u umbrelu).
+# Adresa v domácí síti pro QR telefonu (kontejner běží v síti hostitele).
 lan_ip_loop() {
   local iface addr
   while true; do
@@ -278,18 +317,14 @@ lan_ip_loop() {
 }
 lan_ip_loop &
 
-# Rotace rostoucích souborů: log ústředny přes 'logger rotate' (drží se
-# jen jedna starší generace), historie hovorů a SMS žurnál ořezem
-# s ponecháním posledních N řádků. Po ořezu se musí vrátit vlastník
-# a práva: soubor zapisuje ústředna a čte ho ovládání (skupina).
+# Rotace rostoucích souborů: log ústředny, historie hovorů a žurnál zpráv.
 rotate_loop() {
   local astlog=/var/log/asterisk
   local max_kb="${LOG_MAX_KB:-5120}" cdr_keep="${CDR_KEEP:-5000}" jr_keep="${JOURNAL_KEEP:-1000}"
   size_kb() { local s; s=$(stat -c %s "$1" 2>/dev/null || echo 0); echo $(( s / 1024 )); }
   trim() { # $1 = soubor, $2 = kolik posledních řádků ponechat
     tail -n "$2" "$1" > "$1.tmp" 2>/dev/null || { rm -f "$1.tmp"; return 0; }
-    # vlastník a práva ještě PŘED výměnou — jinak by mezi mv a chown
-    # zapisovatel (ústředna) dostal EACCES a záznam by se tiše ztratil
+    # vlastník a práva ještě PŘED výměnou souboru
     chown asterisk "$1.tmp" 2>/dev/null || true
     chgrp 65534 "$1.tmp" 2>/dev/null || true
     chmod 0640 "$1.tmp" 2>/dev/null || true
@@ -299,13 +334,11 @@ rotate_loop() {
     sleep 3600
     if [[ $(size_kb "$astlog/messages.log") -ge $max_kb || $(size_kb "$astlog/debug.log") -ge $max_kb ]]; then
       asterisk -rx 'logger rotate' >/dev/null 2>&1 || true
-      # z generací se drží jen nejnovější — podle času, ne podle čísla
-      # (číslování se liší podle rotatestrategy a starý vyrenderovaný
-      # logger.conf na bind mountu ji mít nemusí)
+      # drží se jen nejnovější generace (podle času)
       for b in messages.log debug.log; do
         ls -t "$astlog/$b".* 2>/dev/null | tail -n +2 | xargs -r rm -f
       done
-      # nový messages.log musí zůstat čitelný pro Diagnostiku v ovládání
+      # log musí zůstat čitelný pro ovládání
       chmod 0644 "$astlog/messages.log" 2>/dev/null || true
     fi
     [[ $(size_kb "$astlog/cdr-csv/Master.csv") -ge 1024 ]] \
@@ -318,10 +351,16 @@ rotate_loop &
 
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
   while true; do
-    asterisk -f -U asterisk
-    log "Asterisk skončil — restart za 2 s"
+    asterisk -f -U asterisk &
+    AST_MAIN=$!
+    printf '%s' "$AST_MAIN" > "$AST_PIDFILE"
+    wait "$AST_MAIN" || true
+    rm -f "$AST_PIDFILE"
+    log "ústředna skončila — restart za 2 s"
     sleep 2
   done
 else
+  # exec nahradí tenhle shell, PID zůstává stejný
+  printf '%s' "$$" > "$AST_PIDFILE"
   exec asterisk -f -U asterisk
 fi

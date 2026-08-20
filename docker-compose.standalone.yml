@@ -1,16 +1,16 @@
-# GSM2SIP — samostatné nasazení na OBECNÉM dockeru (jakýkoli Linux, x86/ARM).
+# Phone21 — samostatné nasazení na OBECNÉM dockeru (jakýkoli Linux, x86/ARM).
 #
-# Na rozdíl od hlavního docker-compose.yml (LXC režim s configure.sh na
-# hostu) se tady kontejner konfiguruje SÁM (entrypoint, tajemství se
-# vygenerují a drží ve volume) a watchdog i VoLTE MBN profil běží uvnitř.
-# Tunel k telefonu řeší tailnet sidecar (login server CockScale).
+# Na rozdíl od hlavního docker-compose.yml se tady kontejner konfiguruje
+# SÁM (tajemství se vygenerují a drží ve volume) a hlídka, profil operátora
+# i filtr privátní sítě běží uvnitř. Privátní síť řeší sidecar
+# (login server CockScale).
 #
 # Použití:
 #   mkdir -p data/{smsdata,spool,astlog,ts-state}
 #   docker compose -f docker-compose.standalone.yml up -d
 #   → web UI: http://<host>:8090 (heslo WEBUI_PASSWORD z env/.env)
-#   → záložka Síť: vložit auth klíč privátní sítě; po připojení tam
-#     najdeš SIP údaje pro Linphone
+#   → záložka Síť: vložit klíč privátní sítě; po připojení tam najdeš
+#     údaje pro telefon
 #
 # Env (volitelně přes .env): WEBUI_PASSWORD (povinné), COUNTRY_CODE,
 # COCKSCALE_URL, TZ, MODEM_BY_ID (viz níže).
@@ -24,11 +24,9 @@ services:
     container_name: gsm2sip-asterisk
     restart: unless-stopped
     network_mode: host
-    # zdraví = CLI socket ústředny odpovídá (jen diagnostika pro docker ps;
-    # restart policy na unhealthy nereaguje); start_period kryje čekání
-    # entrypointu na adresu privátní sítě před startem ústředny
+    # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
     healthcheck:
-      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -39,20 +37,21 @@ services:
       SUPERVISE: "1"
       WATCHDOG_INTERNAL: "1"
       MBN_INTERNAL: "1"
-      # VoLTE profil: auto = volba podle mapy operátor→profil (MBN_MAP);
-      # mapa jde dodat i souborem mbn.env v datovém adresáři
+      FIREWALL_INTERNAL: ${FIREWALL_INTERNAL:-1}   # filtr provozu z privátní sítě
+      # profil operátora: auto = volba podle mapy operátor→profil (MBN_MAP);
+      # mapu lze dodat i souborem mbn.env v datovém adresáři
       MBN_PROFILE: ${MBN_PROFILE:-auto}
       MBN_MAP: ${MBN_MAP:-}
       COUNTRY_CODE: ${COUNTRY_CODE:-420}
       AMI_BIND: 0.0.0.0
-      # webui běží v bridge síti dockeru → povolit lokální + docker subnety
+      # ovládání běží v mostové síti dockeru → povolit lokální adresy
       AMI_PERMIT: "127.0.0.1/255.255.255.255,172.16.0.0/255.240.0.0"
       # Ostrovní režim: při výpadku domácího internetu přepne krabička
       # default route na data modemu (WWAN_FAILOVER=1 + APN tarifu SIM).
       WWAN_FAILOVER: ${WWAN_FAILOVER:-0}
       WWAN_APN: ${WWAN_APN:-internet}
     cap_add:
-      - NET_ADMIN              # ostrovní režim: správa wwan0 a default route
+      - NET_ADMIN              # ostrovní režim a filtr privátní sítě
     group_add:
       - "20"
     devices:
@@ -63,8 +62,7 @@ services:
       - ./data/smsdata:/var/lib/gsm2sip
       - ./data/spool:/var/spool/asterisk/outgoing
       - ./data/astlog:/var/log/asterisk
-      # systemd D-Bus hostitele: appka si tím uvolní QMI rozhraní modemu
-      # (na většině systémů ho drží ModemManager)
+      # systemd D-Bus hostitele: uvolnění datového rozhraní modemu
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   webui:
@@ -72,16 +70,15 @@ services:
     build: ./webui
     container_name: gsm2sip-webui
     restart: unless-stopped
-    # zdraví = přihlašovací stránka odpovídá; curl v obraze není,
-    # kontrola jde přes python (stdlib)
+    # zdraví = přihlašovací stránka odpovídá
     healthcheck:
       test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
-    # 8091 = provisioning softphonu: musí být dosažitelný z telefonu přímo
-    # (Linphone se neumí přihlásit), chrání ho jednorázový token
+    # 8091 = nastavení telefonu, dosažitelné z telefonu přímo;
+    # chrání ho jednorázový token
     ports:
       - "8090:8090"
       - "8091:8091"
@@ -98,8 +95,7 @@ services:
     volumes:
       - ./data/smsdata:/var/lib/gsm2sip:ro
       - ./data/smsdata/ts:/var/lib/gsm2sip/ts:rw
-      # stav ovládání (tajemství 2FA, token brány) — jediné rw místo webui
-      # mimo ts/; zakládá a práva nastavuje entrypoint ústředny
+      # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
       - ./data/smsdata/webui:/var/lib/gsm2sip/webui:rw
       - ./data/astlog:/var/log/asterisk:ro
 

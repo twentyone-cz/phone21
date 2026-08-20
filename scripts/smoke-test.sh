@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 #
-# GSM2SIP — smoke test před vydáním. Spouští se v kořeni repa na stroji
-# s dockerem (typicky vývojová brána). ŽÁDNÝ TAG BEZ ZELENÉHO BĚHU.
-#
-# Vznikl po 0.9.21, které odešlo do storu 76 sekund po commitu a dvě jeho
-# hlavní funkce byly rozbité způsobem, který by odhalila první minuta běhu.
+# Phone21 — smoke test před vydáním. Spouští se v kořeni repa na stroji
+# s dockerem. ŽÁDNÝ TAG BEZ ZELENÉHO BĚHU.
 #
 #   ./scripts/smoke-test.sh
 #
 # Kontroluje: validitu compose souborů, build obou obrazů, přítomnost
 # souborů, na kterých stojí funkce (sms-queue.sh!), start ústředny včetně
 # dialplanu a CDR adresáře, start ovládání včetně přihlašovací stránky,
-# a zákaz názvů technologií ve veřejných textech.
+# filtr provozu z privátní sítě a zákaz názvů technologií ve veřejných
+# textech.
 
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -124,14 +122,48 @@ assert 'OVL-E01' in b, 'chybi OVL-E01'
 }
 step "špatné heslo vrací OVL-E01" web_badpass_check
 
-# --- 6. veřejné texty bez názvů technologií --------------------------------
+# --- 6. filtr provozu z privátní sítě --------------------------------------
+fw_syntax_check() {
+  # nft -c potřebuje NET_ADMIN, jinak skončí na inicializaci cache
+  docker run --rm --cap-add NET_ADMIN --entrypoint sh gsm2sip-asterisk:smoke \
+    -c 'nft -c -f /opt/gsm2sip/tunnel-firewall.nft'
+}
+step "pravidla filtru mají platnou syntaxi" fw_syntax_check
+step "skript filtru je v obraze a spustitelný" \
+  docker run --rm --entrypoint sh gsm2sip-asterisk:smoke \
+    -c 'test -x /opt/gsm2sip/scripts/tunnel-firewall.sh && bash -n /opt/gsm2sip/scripts/tunnel-firewall.sh'
+fw_default_off_check() {
+  # bez FIREWALL_INTERNAL se filtr nesmí zapnout
+  ! docker logs "$AST" 2>&1 | grep -q '\[firewall\]'
+}
+step "bez FIREWALL_INTERNAL se filtr nezapíná" fw_default_off_check
+
+# --- 7. veřejné texty bez názvů technologií --------------------------------
+# Samostatná slova v lidsky psaném textu; identifikátory (gsm2sip,
+# asterisk.conf, tailscale0) \b nechytí, resp. jsou vyloučené níže.
+TECH_RE='\b(sip|asterisk|tailscale|linphone|wireguard|headscale|voip|quectel|volte|csfb|graphene|radicale|davx|it-one)\b'
 public_text_check() {
-  # id "gsm2sip" a URL nevadí (\b nechytí sip uvnitř gsm2sip); hledá se
-  # samostatné slovo v lidsky psaném textu
-  ! grep -inE '\b(sip|asterisk|tailscale|linphone|wireguard|headscale|voip)\b' \
+  ! grep -inE "$TECH_RE" \
       umbrel/jednadvacet-gsm2sip/umbrel-app.yml
 }
 step "umbrel-app.yml bez názvů technologií" public_text_check
+public_docs_check() {
+  ! grep -inE "$TECH_RE" README.md docs/faq.md docs/telefon.md \
+    | grep -vE '(asterisk|webui|scripts|docker|dav)/'
+}
+step "README a veřejné návody bez názvů technologií" public_docs_check
+public_compose_check() {
+  # v compose zůstávají jen identifikátory (názvy služeb, obrazů, cest)
+  ! grep -inE "$TECH_RE" umbrel/jednadvacet-gsm2sip/docker-compose.yml \
+    | grep -vE 'image:|container_name|_1|/var/|/opt/|/etc/|GSM2SIP_|AMI_|SIP_|asterisk:|tailscale/tailscale|asterisk -rx|tailscale ip|gsm2sip-ts|tailscale0|/gsm2sip'
+}
+step "umbrel compose bez názvů technologií v textu" public_compose_check
+webui_text_check() {
+  # v ovládání se hlídá jen to, co vidí zákazník v textu stránek
+  ! grep -inE 'AT příkaz|VoLTE|CSFB|GrapheneOS|Linphon' webui/app.py \
+    | grep -vE 'linphone\.org|linphone-config:|volte_state|"volte"|volte ==|volte =='
+}
+step "texty ovládání bez názvů technologií" webui_text_check
 
 echo
 echo "== výsledek: ${PASS} PASS, ${FAIL} FAIL =="
