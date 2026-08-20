@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GSM2SIP — host-setup.sh
+# Phone21 — host-setup.sh
 #
 # JEDINÝ host-level zásah celého projektu (spouštět na umbrelOS Pi, přes sudo).
 # Idempotentní — bezpečné spustit opakovaně, nutné spustit po každém updatu

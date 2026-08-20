@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GSM2SIP — „ostrovní režim": internet přes USB modem (QMI data)
+# Phone21 — „ostrovní režim": internet přes USB modem (QMI data)
 #
 #   wwan.sh start    # sestavit datové spojení a nastavit záložní default route
 #   wwan.sh stop     # spojení položit a uklidit
@@ -31,7 +31,7 @@ M_ACTIVE="${WWAN_METRIC_ACTIVE:-50}"
 CHECK_HOST="${WWAN_CHECK_HOST:-1.1.1.1}"
 CHECK_INT="${WWAN_CHECK_INTERVAL:-15}"
 FAIL_N="${WWAN_FAIL_N:-4}"
-STATE=/var/lib/gsm2sip/wwan.state
+STATE=/var/lib/phone21/wwan.state
 
 log() { echo "[wwan] $(date -Is) $*"; }
 qmi() { timeout 25 qmicli -d "$DEV" "$@"; }
@@ -117,15 +117,15 @@ case "${1:-}" in
     ;;
   watch)
     log "failover watch: kontrola $CHECK_HOST po ${CHECK_INT}s, práh $FAIL_N"
-    # Zapnuto/vypnuto se řídí za běhu z web UI (AstDB gsm2sip/island_mode).
+    # Zapnuto/vypnuto se řídí za běhu z web UI (AstDB phone21/island_mode).
     island_on() {
-      asterisk -rx "database get gsm2sip island_mode" 2>/dev/null | grep -q "Value: on"
+      asterisk -rx "database get phone21 island_mode" 2>/dev/null | grep -q "Value: on"
     }
     # Bez VoLTE jde hovor CSFB do 2G a datové spojení na tu dobu padá —
     # v ostrovním režimu tím zmizí i cesta k telefonu. Stav plní mbn smyčka.
     # Neznámý stav (jinde než v Umbrel appce ho nikdo neplní) se nehlásí —
     # varuje se jen na prokazatelně chybějící VoLTE.
-    volte_ok() { [[ "$(cat /var/lib/gsm2sip/volte 2>/dev/null)" != "not-registered" ]]; }
+    volte_ok() { [[ "$(cat /var/lib/phone21/volte 2>/dev/null)" != "not-registered" ]]; }
     fails=0; active=0; warned=0; volte_warned=0
     while true; do
       # rozhraní se může objevit až po uvolnění QMI (ModemManager) — hlídka

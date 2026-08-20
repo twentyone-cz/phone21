@@ -15,8 +15,8 @@ set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 PASS=0; FAIL=0
-AST=gsm2sip-smoke-ast
-WEB=gsm2sip-smoke-web
+AST=phone21-smoke-ast
+WEB=phone21-smoke-web
 
 step() { # $1 popis, $2.. příkaz (i funkce)
   local desc="$1"; shift
@@ -50,29 +50,29 @@ try:
 except ImportError:
     print("pyyaml neni k dispozici - kontrola preskocena")
     raise SystemExit(0)
-yaml.safe_load(open("umbrel/jednadvacet-gsm2sip/docker-compose.yml"))
+yaml.safe_load(open("umbrel/phone21/docker-compose.yml"))
 PYEOF
 }
 step "umbrel compose je validní YAML" umbrel_yaml_check
 
 # --- 2. build obrazů -------------------------------------------------------
 step "build obrazu ústředny" \
-  docker build -q -f docker/Dockerfile -t gsm2sip-asterisk:smoke .
+  docker build -q -f docker/Dockerfile -t phone21-pbx:smoke .
 step "build obrazu ovládání" \
-  docker build -q -t gsm2sip-webui:smoke webui/
+  docker build -q -t phone21-ui:smoke webui/
 
 # --- 3. statické kontroly obsahu obrazu ------------------------------------
 step "sms-queue.sh je v obraze a spustitelný" \
-  docker run --rm --entrypoint sh gsm2sip-asterisk:smoke -c \
-    'test -x /usr/local/gsm2sip/sms-queue.sh && sh -n /usr/local/gsm2sip/sms-queue.sh'
+  docker run --rm --entrypoint sh phone21-pbx:smoke -c \
+    'test -x /usr/local/phone21/sms-queue.sh && sh -n /usr/local/phone21/sms-queue.sh'
 step "šablony a entrypoint v obraze" \
-  docker run --rm --entrypoint sh gsm2sip-asterisk:smoke -c \
-    'test -f /opt/gsm2sip/templates/extensions.conf && test -f /opt/gsm2sip/templates/cdr.conf && bash -n /opt/gsm2sip/entrypoint.sh'
+  docker run --rm --entrypoint sh phone21-pbx:smoke -c \
+    'test -f /opt/phone21/templates/extensions.conf && test -f /opt/phone21/templates/cdr.conf && bash -n /opt/phone21/entrypoint.sh'
 
 # --- 4. ústředna nastartuje (bez modemu, selfconfig) ------------------------
 step "start kontejneru ústředny" \
-  docker run -d --name "$AST" -e GSM2SIP_SELFCONFIG=1 -e TS_WAIT=1 \
-    gsm2sip-asterisk:smoke
+  docker run -d --name "$AST" -e PHONE21_SELFCONFIG=1 -e TS_WAIT=1 \
+    phone21-pbx:smoke
 ast_boot_check() {
   # CLI socket vzniká až po startu procesu — bez opakování by kontrola
   # závodila se startem a falešně padala
@@ -94,13 +94,13 @@ ast_dialplan_check() {
 step "dialplan volá sms-queue.sh" ast_dialplan_check
 ast_journal_check() {
   docker exec "$AST" sh -c \
-    '/usr/local/gsm2sip/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/gsm2sip/journal.jsonl'
+    '/usr/local/phone21/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/phone21/journal.jsonl'
 }
 step "žurnál SMS jde zapsat (sms-queue.sh journal)" ast_journal_check
 
 # --- 5. ovládání nastartuje a mluví ----------------------------------------
 step "start kontejneru ovládání" \
-  docker run -d --name "$WEB" -e WEBUI_PASSWORD=smoke gsm2sip-webui:smoke
+  docker run -d --name "$WEB" -e WEBUI_PASSWORD=smoke phone21-ui:smoke
 step "modul app.py jde importovat" \
   docker exec "$WEB" python3 -c "import sys; sys.path.insert(0, '/app'); import app"
 web_login_check() {
@@ -125,13 +125,13 @@ step "špatné heslo vrací OVL-E01" web_badpass_check
 # --- 6. filtr provozu z privátní sítě --------------------------------------
 fw_syntax_check() {
   # nft -c potřebuje NET_ADMIN, jinak skončí na inicializaci cache
-  docker run --rm --cap-add NET_ADMIN --entrypoint sh gsm2sip-asterisk:smoke \
-    -c 'nft -c -f /opt/gsm2sip/tunnel-firewall.nft'
+  docker run --rm --cap-add NET_ADMIN --entrypoint sh phone21-pbx:smoke \
+    -c 'nft -c -f /opt/phone21/tunnel-firewall.nft'
 }
 step "pravidla filtru mají platnou syntaxi" fw_syntax_check
 step "skript filtru je v obraze a spustitelný" \
-  docker run --rm --entrypoint sh gsm2sip-asterisk:smoke \
-    -c 'test -x /opt/gsm2sip/scripts/tunnel-firewall.sh && bash -n /opt/gsm2sip/scripts/tunnel-firewall.sh'
+  docker run --rm --entrypoint sh phone21-pbx:smoke \
+    -c 'test -x /opt/phone21/scripts/tunnel-firewall.sh && bash -n /opt/phone21/scripts/tunnel-firewall.sh'
 fw_default_off_check() {
   # bez FIREWALL_INTERNAL se filtr nesmí zapnout
   ! docker logs "$AST" 2>&1 | grep -q '\[firewall\]'
@@ -139,12 +139,12 @@ fw_default_off_check() {
 step "bez FIREWALL_INTERNAL se filtr nezapíná" fw_default_off_check
 
 # --- 7. veřejné texty bez názvů technologií --------------------------------
-# Samostatná slova v lidsky psaném textu; identifikátory (gsm2sip,
+# Samostatná slova v lidsky psaném textu; identifikátory (phone21,
 # asterisk.conf, tailscale0) \b nechytí, resp. jsou vyloučené níže.
 TECH_RE='\b(sip|asterisk|tailscale|linphone|wireguard|headscale|voip|quectel|volte|csfb|graphene|radicale|davx|it-one)\b'
 public_text_check() {
   ! grep -inE "$TECH_RE" \
-      umbrel/jednadvacet-gsm2sip/umbrel-app.yml
+      umbrel/phone21/umbrel-app.yml
 }
 step "umbrel-app.yml bez názvů technologií" public_text_check
 public_docs_check() {
@@ -154,8 +154,8 @@ public_docs_check() {
 step "README a veřejné návody bez názvů technologií" public_docs_check
 public_compose_check() {
   # v compose zůstávají jen identifikátory (názvy služeb, obrazů, cest)
-  ! grep -inE "$TECH_RE" umbrel/jednadvacet-gsm2sip/docker-compose.yml \
-    | grep -vE 'image:|container_name|_1|/var/|/opt/|/etc/|GSM2SIP_|AMI_|SIP_|asterisk:|tailscale/tailscale|asterisk -rx|tailscale ip|gsm2sip-ts|tailscale0|/gsm2sip'
+  ! grep -inE "$TECH_RE" umbrel/phone21/docker-compose.yml \
+    | grep -vE 'image:|container_name|_1|/var/|/opt/|/etc/|Phone21_|AMI_|SIP_|asterisk:|tailscale/tailscale|asterisk -rx|tailscale ip|phone21-ts|tailscale0|/phone21'
 }
 step "umbrel compose bez názvů technologií v textu" public_compose_check
 webui_text_check() {

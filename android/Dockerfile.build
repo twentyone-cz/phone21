@@ -1,9 +1,9 @@
 # Build prostředí pro APK (Android SDK + Gradle) — spouštět na build stroji,
 # ať se dev stroj nezaplní SDK a gradle cachemi:
 #
-#   docker build -t gsm2sip-android -f android/Dockerfile.build android/
+#   docker build -t phone21-android-build -f android/Dockerfile.build android/
 #   docker run --rm -v "$PWD/android/dialer:/src" -v gradle-cache:/root/.gradle \
-#     gsm2sip-android gradle assembleDebug
+#     phone21-android-build gradle assembleDebug
 #
 # Výsledek: dialer/app/build/outputs/apk/debug/app-debug.apk
 FROM eclipse-temurin:17-jdk-jammy

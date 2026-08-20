@@ -16,12 +16,12 @@
 # COCKSCALE_URL, TZ, MODEM_BY_ID (viz níže).
 
 services:
-  asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.25
+  pbx:
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.25
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: gsm2sip-asterisk
+    container_name: phone21-pbx
     restart: unless-stopped
     network_mode: host
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
@@ -33,7 +33,7 @@ services:
       start_period: 120s
     environment:
       TZ: ${TZ:-Europe/Prague}
-      GSM2SIP_SELFCONFIG: "1"
+      PHONE21_SELFCONFIG: "1"
       SUPERVISE: "1"
       WATCHDOG_INTERNAL: "1"
       MBN_INTERNAL: "1"
@@ -59,16 +59,16 @@ services:
       - "${MODEM_AUDIO_BY_ID:-/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0}:/dev/ttyUSB4"
       - "/dev/cdc-wdm0:/dev/cdc-wdm0"
     volumes:
-      - ./data/smsdata:/var/lib/gsm2sip
+      - ./data/smsdata:/var/lib/phone21
       - ./data/spool:/var/spool/asterisk/outgoing
       - ./data/astlog:/var/log/asterisk
       # systemd D-Bus hostitele: uvolnění datového rozhraní modemu
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
-  webui:
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.25
+  ui:
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.25
     build: ./webui
-    container_name: gsm2sip-webui
+    container_name: phone21-ui
     restart: unless-stopped
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
@@ -87,21 +87,21 @@ services:
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:?nastav WEBUI_PASSWORD}
       WEBUI_PORT: 8090
       AMI_HOST: host.docker.internal
-      AMI_SECRETS_FILE: /var/lib/gsm2sip/secrets.env
-      TS_DIR: /var/lib/gsm2sip/ts
+      AMI_SECRETS_FILE: /var/lib/phone21/secrets.env
+      TS_DIR: /var/lib/phone21/ts
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./data/smsdata:/var/lib/gsm2sip:ro
-      - ./data/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      - ./data/smsdata:/var/lib/phone21:ro
+      - ./data/smsdata/ts:/var/lib/phone21/ts:rw
       # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
-      - ./data/smsdata/webui:/var/lib/gsm2sip/webui:rw
+      - ./data/smsdata/webui:/var/lib/phone21/webui:rw
       - ./data/astlog:/var/log/asterisk:ro
 
-  tailnet:
+  net:
     image: tailscale/tailscale:v1.86.2
-    container_name: gsm2sip-tailnet
+    container_name: phone21-net
     restart: unless-stopped
     network_mode: host
     cap_add:
@@ -114,18 +114,18 @@ services:
       COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
     volumes:
       - ./data/ts-state:/var/lib/tailscale
-      - ./data/smsdata/ts:/gsm2sip-ts
+      - ./data/smsdata/ts:/phone21-ts
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        until [ -s /phone21-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
         tailscaled --state=/var/lib/tailscale/tailscaled.state &
         sleep 3
-        if [ -s /gsm2sip-ts/authkey ]; then
-          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        if [ -s /phone21-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /phone21-ts/authkey)" --accept-dns=false && rm -f /phone21-ts/authkey
         fi
         while true; do
           ip="$$(tailscale ip -4 2>/dev/null | head -1)"
-          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
           sleep 60
         done

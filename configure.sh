@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GSM2SIP — vygeneruje runtime konfiguraci Asterisku z šablon + .env
+# Phone21 — vygeneruje runtime konfiguraci Asterisku z šablon + .env
 #
 # Proč: umbreld při updatu appky přepisuje obsah adresáře appky, a hesla
 # nesmí do gitu. Konfigurace se proto JEDNOU vygeneruje do runtime adresáře
@@ -85,7 +85,7 @@ fi
 # naše šablony se položí přes něj. Bez dockeru se použije jen minimální sada
 # šablon (funguje taky — chybějící .conf = defaulty Asterisku).
 # Stejný default jako v docker-compose.yml; override přes ASTERISK_IMAGE v .env.
-IMAGE="${ASTERISK_IMAGE:-gsm2sip-asterisk:local}"
+IMAGE="${ASTERISK_IMAGE:-phone21-pbx:local}"
 DOCKER="docker"
 if ! docker info >/dev/null 2>&1; then
   if sudo docker info >/dev/null 2>&1; then DOCKER="sudo docker"; else DOCKER=""; fi

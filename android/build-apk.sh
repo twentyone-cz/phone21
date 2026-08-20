@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# GSM2SIP — build podepsaného APK. Spouštět na build stroji (docker + image
-# gsm2sip-android z android/Dockerfile.build).
+# Phone21 — build podepsaného APK. Spouštět na build stroji (docker + image
+# phone21-android-build z android/Dockerfile.build).
 #
 #   ./android/build-apk.sh            # release, podepsaný
 #   DEBUG=1 ./android/build-apk.sh    # debug build bez podpisu
@@ -12,7 +12,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KEYSTORE_DIR="${KEYSTORE_DIR:-/root/android-keystore}"
-IMAGE="${IMAGE:-gsm2sip-android}"
+IMAGE="${IMAGE:-phone21-android-build}"
 
 if [[ "${DEBUG:-0}" == "1" ]]; then
   docker run --rm -v "$REPO/android/dialer:/src" -v gradle-cache:/root/.gradle \
@@ -30,9 +30,9 @@ docker run --rm \
   -v "$REPO/android/dialer:/src" \
   -v gradle-cache:/root/.gradle \
   -v "$KEYSTORE_DIR:/keystore:ro" \
-  -e GSM2SIP_KEYSTORE=/keystore/jednadvacet.jks \
-  -e GSM2SIP_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" \
-  -e GSM2SIP_KEY_ALIAS="$KEY_ALIAS" \
+  -e PHONE21_KEYSTORE=/keystore/jednadvacet.jks \
+  -e PHONE21_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" \
+  -e PHONE21_KEY_ALIAS="$KEY_ALIAS" \
   "$IMAGE" gradle assembleRelease
 
 APK="$REPO/android/dialer/app/build/outputs/apk/release/app-release.apk"

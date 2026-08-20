@@ -3,7 +3,7 @@
 # Phone21 — firewall brány na LXC (nftables).
 #
 # Z internetu není dostupné nic; telefonování jen z privátní sítě; správa
-# z domácí sítě i z privátní sítě. Vlastní tabulka `inet gsm2sip`
+# z domácí sítě i z privátní sítě. Vlastní tabulka `inet phone21-lxc`
 # koexistuje s pravidly dockeru, nikdy se nevolá `flush ruleset`.
 #
 # Nasazení a rollback: scripts/install-firewall.sh.
@@ -20,10 +20,10 @@ define WEBUI_PORT = 8090           # .env WEBUI_PORT
 define PROV_PORT  = 8091           # provisioning telefonu (jednorázový token)
 
 # Idempotence: tabulku vyrob prázdnou, smaž a nadefinuj.
-table inet gsm2sip {}
-delete table inet gsm2sip
+table inet phone21-lxc {}
+delete table inet phone21-lxc
 
-table inet gsm2sip {
+table inet phone21-lxc {
 
   chain input {
     type filter hook input priority filter; policy drop;
@@ -60,7 +60,7 @@ table inet gsm2sip {
 
     # Zahozené pakety zalogovat, ale s limitem (log je v dmesg / journalu).
     limit rate 5/minute burst 5 packets \
-      log prefix "gsm2sip-fw-drop: " level info
+      log prefix "phone21-lxc-fw-drop: " level info
   }
 
   chain forward {

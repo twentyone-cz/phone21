@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GSM2SIP — carrier profil modemu (potřebný pro VoLTE)
+# Phone21 — carrier profil modemu (potřebný pro VoLTE)
 #
 #   mbn-profile.sh auto              # vybrat a aktivovat profil dle SIM
 #   mbn-profile.sh status            # aktivní profil + stav IMS registrace

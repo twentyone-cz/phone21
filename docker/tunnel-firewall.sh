@@ -9,8 +9,8 @@
 #   tunnel-firewall.sh off      pravidla odstraní
 set -u
 
-DATA="${GSM2SIP_DATA:-/var/lib/gsm2sip}"
-RULES="${FW_RULES:-/opt/gsm2sip/tunnel-firewall.nft}"
+DATA="${PHONE21_DATA:-/var/lib/phone21}"
+RULES="${FW_RULES:-/opt/phone21/tunnel-firewall.nft}"
 GEN=/run/phone21-fw.nft
 ERRLOG=/run/phone21-fw.err
 STATE="$DATA/firewall"

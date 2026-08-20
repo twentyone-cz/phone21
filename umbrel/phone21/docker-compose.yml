@@ -8,11 +8,11 @@ version: "3.7"
 services:
   app_proxy:
     environment:
-      APP_HOST: jednadvacet-gsm2sip_webui_1
+      APP_HOST: phone21_ui_1
       APP_PORT: 8090
 
-  asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.25@sha256:0631dbb4d2e6dc3075079a2fd760d4c56ea1ccc1bfc04c02e6bc0e0017caa536
+  pbx:
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.25@sha256:0631dbb4d2e6dc3075079a2fd760d4c56ea1ccc1bfc04c02e6bc0e0017caa536
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
@@ -24,7 +24,7 @@ services:
       start_period: 120s
     environment:
       TZ: ${TZ:-Europe/Prague}
-      GSM2SIP_SELFCONFIG: "1"     # render konfigurace při každém startu
+      PHONE21_SELFCONFIG: "1"     # render konfigurace při každém startu
       SUPERVISE: "1"              # restart procesu po pádu/watchdogu
       WATCHDOG_INTERNAL: "1"      # hlídání modemu
       MBN_INTERNAL: "1"           # profil operátora v modemu
@@ -50,18 +50,18 @@ services:
       - "/dev/serial/by-id/usb-SimTech__Incorporated_SimTech__Incorporated_0123456789ABCDEF-if04-port0:/dev/ttyUSB4"
       - "/dev/cdc-wdm0:/dev/cdc-wdm0"   # datové rozhraní modemu (volitelné)
     volumes:
-      - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip
+      - ${APP_DATA_DIR}/data/smsdata:/var/lib/phone21
       - ${APP_DATA_DIR}/data/spool:/var/spool/asterisk/outgoing
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk
       # systemd D-Bus hostitele: uvolnění datového rozhraní modemu
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
-  webui:
+  ui:
     # 8091 = nastavení telefonu, dosažitelné z telefonu přímo;
     # chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.25@sha256:8a260d5e09a7dbf5bfd9d651af48cce7e8084da42382280afa9dd39f3783bc30
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.25@sha256:8a260d5e09a7dbf5bfd9d651af48cce7e8084da42382280afa9dd39f3783bc30
     restart: on-failure
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
@@ -77,21 +77,21 @@ services:
       AMI_HOST: host.docker.internal
       # heslo k rozhraní ústředny generuje kontejner ústředny, ovládání
       # si ho přečte ze sdíleného souboru:
-      AMI_SECRETS_FILE: /var/lib/gsm2sip/secrets.env
-      TS_DIR: /var/lib/gsm2sip/ts
+      AMI_SECRETS_FILE: /var/lib/phone21/secrets.env
+      TS_DIR: /var/lib/phone21/ts
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
       UI_MODE: gui             # spotřebitelský dashboard (Docker default = expert)
       NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/pay}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${APP_DATA_DIR}/data/smsdata:/var/lib/gsm2sip:ro
-      - ${APP_DATA_DIR}/data/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      - ${APP_DATA_DIR}/data/smsdata:/var/lib/phone21:ro
+      - ${APP_DATA_DIR}/data/smsdata/ts:/var/lib/phone21/ts:rw
       # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
-      - ${APP_DATA_DIR}/data/smsdata/webui:/var/lib/gsm2sip/webui:rw
+      - ${APP_DATA_DIR}/data/smsdata/webui:/var/lib/phone21/webui:rw
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk:ro
 
-  tailnet:
+  net:
     # Sidecar privátní sítě (login server CockScale, telemetrie vypnutá).
     # Čeká na klíč, který uživatel vloží v ovládání (záložka Síť).
     image: tailscale/tailscale:v1.86.2@sha256:241d9518b7e0b6e533dbd0117fcea15acb4174249210837f52b71615949ce9d2
@@ -107,22 +107,22 @@ services:
       COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
     volumes:
       - ${APP_DATA_DIR}/data/ts-state:/var/lib/tailscale
-      - ${APP_DATA_DIR}/data/smsdata/ts:/gsm2sip-ts
+      - ${APP_DATA_DIR}/data/smsdata/ts:/phone21-ts
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         # počkat na klíč z ovládání, pak se připojit na CockScale;
         # adresu v síti zapsat pro ústřednu a pro ovládání
-        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        until [ -s /phone21-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
         # rozhraní sítě vzniká na hostiteli, aby byla ústředna dosažitelná
         # na adrese v privátní síti
         tailscaled --state=/var/lib/tailscale/tailscaled.state &
         sleep 3
-        if [ -s /gsm2sip-ts/authkey ]; then
-          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        if [ -s /phone21-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /phone21-ts/authkey)" --accept-dns=false && rm -f /phone21-ts/authkey
         fi
         while true; do
           ip="$$(tailscale ip -4 2>/dev/null | head -1)"
-          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
           sleep 60
         done

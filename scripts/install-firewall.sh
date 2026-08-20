@@ -18,10 +18,10 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/firewall.nft"
-DST=/etc/nftables.d/gsm2sip.nft
-UNIT_NAME=gsm2sip-firewall.service
+DST=/etc/nftables.d/phone21.nft
+UNIT_NAME=phone21-firewall.service
 UNIT=/etc/systemd/system/${UNIT_NAME}
-ROLLBACK=gsm2sip-fw-rollback
+ROLLBACK=phone21-fw-rollback
 GRACE="${GRACE:-300}"
 NFT=/usr/sbin/nft
 
@@ -41,8 +41,8 @@ disarm() {
 
 case "${1:-}" in
   --status)
-    echo "=== tabulka inet gsm2sip ==="
-    "${NFT}" list table inet gsm2sip 2>/dev/null || echo "(není načtená)"
+    echo "=== tabulka inet phone21-lxc ==="
+    "${NFT}" list table inet phone21-lxc 2>/dev/null || echo "(není načtená)"
     echo "=== rollback ==="
     if rollback_armed; then
       systemctl list-timers --all --no-legend "${ROLLBACK}.timer"
@@ -58,14 +58,14 @@ case "${1:-}" in
   --rollback)
     disarm
     systemctl disable --now "${UNIT_NAME}" 2>/dev/null || true
-    "${NFT}" delete table inet gsm2sip 2>/dev/null || true
+    "${NFT}" delete table inet phone21-lxc 2>/dev/null || true
     echo "Firewall sundán. Docker pravidla (ip filter/nat) zůstala nedotčená."
     exit 0
     ;;
 
   --commit)
-    "${NFT}" list table inet gsm2sip >/dev/null 2>&1 \
-      || die "tabulka inet gsm2sip není načtená — není co potvrzovat"
+    "${NFT}" list table inet phone21-lxc >/dev/null 2>&1 \
+      || die "tabulka inet phone21-lxc není načtená — není co potvrzovat"
     disarm
     systemctl enable "${UNIT_NAME}" >/dev/null
     echo "Potvrzeno. Rollback zrušen, ${UNIT_NAME} se spustí i po rebootu."
@@ -86,7 +86,7 @@ install -m 644 "${SRC}" "${DST}"
 
 cat > "${UNIT}" <<EOF
 [Unit]
-Description=GSM2SIP firewall (nftables, tabulka inet gsm2sip)
+Description=Phone21 firewall (nftables, tabulka inet phone21-lxc)
 # Po dockeru jen kvůli přehlednosti logů.
 After=network-pre.target docker.service wg-quick@wg0.service
 Wants=network-pre.target
@@ -95,7 +95,7 @@ Wants=network-pre.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=${NFT} -f ${DST}
-ExecStop=${NFT} delete table inet gsm2sip
+ExecStop=${NFT} delete table inet phone21-lxc
 
 [Install]
 WantedBy=multi-user.target
@@ -105,8 +105,8 @@ systemctl daemon-reload
 disarm
 systemd-run --unit="${ROLLBACK}" --on-active="${GRACE}" \
   --timer-property=AccuracySec=1s \
-  --description="GSM2SIP: automatické sundání firewallu, pokud se nepotvrdí" \
-  "${NFT}" delete table inet gsm2sip >/dev/null
+  --description="Phone21: automatické sundání firewallu, pokud se nepotvrdí" \
+  "${NFT}" delete table inet phone21-lxc >/dev/null
 
 "${NFT}" -f "${DST}"
 

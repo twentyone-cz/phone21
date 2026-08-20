@@ -1,8 +1,8 @@
 #!/bin/sh
-# GSM2SIP — žurnál a retry fronta příchozích SMS
+# Phone21 — žurnál a retry fronta příchozích SMS
 #
 # Volá se z dialplanu (System() pod uživatelem asterisk v kontejneru).
-# Data: /var/lib/gsm2sip (persistentní volume), plán: /var/spool/asterisk/
+# Data: /var/lib/phone21 (persistentní volume), plán: /var/spool/asterisk/
 # outgoing (call files; persistentní volume — retry přežije restart).
 #
 #   sms-queue.sh journal <status> <b64-json>            zápis do žurnálu
@@ -17,7 +17,7 @@
 # takže tiky ve stropu jsou téměř zadarmo.
 
 set -u
-DATA=/var/lib/gsm2sip
+DATA=/var/lib/phone21
 QDIR=$DATA/queue
 JOURNAL=$DATA/journal.jsonl
 SPOOL=/var/spool/asterisk/outgoing

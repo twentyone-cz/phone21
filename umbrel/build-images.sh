@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# GSM2SIP — build a push multi-arch (amd64/arm64) obrazů pro Umbrel appku
+# Phone21 — build a push multi-arch (amd64/arm64) obrazů pro Umbrel appku
 # do GitHub Container Registry (ghcr.io).
 #
 # Spouštět na stroji s dockerem (LXC brány). Předpoklady:
 #   - docker buildx s builderem umějícím --push (docker-container driver):
-#       docker buildx create --name gsm2sip --driver docker-container --use
+#       docker buildx create --name phone21 --driver docker-container --use
 #   - qemu binfmt pro arm64 (jednorázově, registruje handlery v kernelu
 #     SDÍLENÉM s Proxmox hostem):
 #       docker run --privileged --rm tonistiigi/binfmt --install arm64
@@ -14,7 +14,7 @@
 #   VERSION=0.9.0 ./umbrel/build-images.sh
 #
 # Po pushi vypíše digesty — před publikací appky připnout v
-# umbrel/jednadvacet-gsm2sip/docker-compose.yml (image@sha256:...).
+# umbrel/phone21/docker-compose.yml (image@sha256:...).
 
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,24 +23,24 @@ REGISTRY="${REGISTRY:-ghcr.io/twentyone-cz}"
 VERSION="${VERSION:?nastav VERSION, např. VERSION=0.9.0}"
 PLATFORMS="linux/amd64,linux/arm64"
 
-echo "==> ${REGISTRY}/gsm2sip-asterisk:${VERSION}"
+echo "==> ${REGISTRY}/phone21-pbx:${VERSION}"
 docker buildx build \
   --platform "${PLATFORMS}" \
   --file "${REPO}/docker/Dockerfile" \
-  --tag "${REGISTRY}/gsm2sip-asterisk:${VERSION}" \
+  --tag "${REGISTRY}/phone21-pbx:${VERSION}" \
   --push \
   "${REPO}"
 
-echo "==> ${REGISTRY}/gsm2sip-webui:${VERSION}"
+echo "==> ${REGISTRY}/phone21-ui:${VERSION}"
 docker buildx build \
   --platform "${PLATFORMS}" \
-  --tag "${REGISTRY}/gsm2sip-webui:${VERSION}" \
+  --tag "${REGISTRY}/phone21-ui:${VERSION}" \
   --push \
   "${REPO}/webui"
 
 echo
 echo "Digesty pro připnutí v umbrel compose:"
-for img in gsm2sip-asterisk gsm2sip-webui; do
+for img in phone21-pbx phone21-ui; do
   docker buildx imagetools inspect "${REGISTRY}/${img}:${VERSION}" \
     | awk -v i="${REGISTRY}/${img}" '/^Digest:/{print i "@" $2; exit}'
 done

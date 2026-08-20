@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GSM2SIP — jednorázový AT příkaz na modem (spouštět přes sudo)
+# Phone21 — jednorázový AT příkaz na modem (spouštět přes sudo)
 #
 #   sudo ./at.sh 'AT+CPIN?'
 #   sudo ./at.sh 'AT+CLCK="SC",0,"1234"'

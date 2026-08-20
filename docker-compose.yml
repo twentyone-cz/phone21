@@ -10,15 +10,15 @@
 # `devices:` (důvody v technických poznámkách).
 
 services:
-  asterisk:
+  pbx:
     # Vlastní image (viz docker/). První start: docker compose build.
     # Override image: ASTERISK_IMAGE v .env.
-    image: ${ASTERISK_IMAGE:-gsm2sip-asterisk:local}
+    image: ${ASTERISK_IMAGE:-phone21-pbx:local}
     # context = kořen repa: Dockerfile peče i šablony a skripty
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: asterisk
+    container_name: phone21-pbx
     network_mode: host          # široký rozsah UDP portů pro hovory
     restart: unless-stopped
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
@@ -37,17 +37,17 @@ services:
       - "c 180:* rwm"             # datové rozhraní modemu
     volumes:
       - ${ASTERISK_CONF_DIR:-./runtime/asterisk}:/etc/asterisk
-      - ./scripts:/usr/local/gsm2sip:ro          # sms-queue.sh (žurnál+retry)
-      - ./runtime/smsdata:/var/lib/gsm2sip       # žurnál, fronta, smsdb (persistentní)
+      - ./scripts:/usr/local/phone21:ro          # sms-queue.sh (žurnál+retry)
+      - ./runtime/smsdata:/var/lib/phone21       # žurnál, fronta, smsdb (persistentní)
       - ./runtime/spool:/var/spool/asterisk/outgoing  # naplánované retry (call files)
       - ./runtime/astlog:/var/log/asterisk       # messages.log pro web UI
       - /dev/ttyUSB2:/dev/ttyUSB2                # servisní port modemu
       - /dev/ttyUSB4:/dev/ttyUSB4                # zvukový port modemu
       - /dev/cdc-wdm0:/dev/cdc-wdm0              # datové rozhraní modemu
 
-  webui:
+  ui:
     build: ./webui
-    container_name: gsm2sip-webui
+    container_name: phone21-ui
     network_mode: host          # ovládání poslouchá na :8090 (jen domácí síť)
     restart: unless-stopped
     # zdraví = přihlašovací stránka odpovídá
@@ -58,7 +58,7 @@ services:
       retries: 3
       start_period: 15s
     depends_on:
-      - asterisk
+      - pbx
     environment:
       TZ: Europe/Prague
       AMI_PASSWORD: ${AMI_PASSWORD}
@@ -68,7 +68,7 @@ services:
       SIP_DOMAIN: ${SIP_DOMAIN}
       COUNTRY_CODE: ${COUNTRY_CODE:-420}  # normalizace čísel na mezinárodní tvar
     volumes:
-      - ./runtime/smsdata:/var/lib/gsm2sip:ro
+      - ./runtime/smsdata:/var/lib/phone21:ro
       # stav ovládání (2FA, token) — jediné místo, kam ovládání zapisuje
-      - ./runtime/smsdata/webui:/var/lib/gsm2sip/webui:rw
+      - ./runtime/smsdata/webui:/var/lib/phone21/webui:rw
       - ./runtime/astlog:/var/log/asterisk:ro

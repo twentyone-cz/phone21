@@ -26,12 +26,12 @@ android {
     // přeskočí a zůstane jen debug.
     signingConfigs {
         release {
-            def ks = System.getenv('GSM2SIP_KEYSTORE')
+            def ks = System.getenv('PHONE21_KEYSTORE')
             if (ks) {
                 storeFile file(ks)
-                storePassword System.getenv('GSM2SIP_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('GSM2SIP_KEY_ALIAS')
-                keyPassword System.getenv('GSM2SIP_KEYSTORE_PASSWORD')
+                storePassword System.getenv('PHONE21_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('PHONE21_KEY_ALIAS')
+                keyPassword System.getenv('PHONE21_KEYSTORE_PASSWORD')
             }
         }
     }
@@ -39,7 +39,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            if (System.getenv('GSM2SIP_KEYSTORE')) {
+            if (System.getenv('PHONE21_KEYSTORE')) {
                 signingConfig signingConfigs.release
             }
         }

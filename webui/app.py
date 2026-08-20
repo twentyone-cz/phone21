@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""GSM2SIP web UI — správa a diagnostika brány.
+"""Phone21 web UI — správa a diagnostika brány.
 
 Čistá stdlib (žádné závislosti). Mluví s Asteriskem přes AMI (localhost),
-žurnál/frontu SMS čte z /var/lib/gsm2sip. Basic auth (WEBUI_PASSWORD).
+žurnál/frontu SMS čte z /var/lib/phone21. Basic auth (WEBUI_PASSWORD).
 Určeno výhradně pro LAN/privátní síť — nikdy nevystavovat veřejně.
 """
 
@@ -24,12 +24,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 AMI_HOST = os.environ.get("AMI_HOST", "127.0.0.1")
 AMI_PORT = int(os.environ.get("AMI_PORT", "5038"))
-AMI_USER = os.environ.get("AMI_USER", "gsm2sip-webui")
+AMI_USER = os.environ.get("AMI_USER", "phone21-ui")
 AMI_PASSWORD = os.environ.get("AMI_PASSWORD", "")
 WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
 WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "8090"))
 SIP_USER = os.environ.get("SIP_USER", "softphone")
-DATA_DIR = os.environ.get("GSM2SIP_DATA", "/var/lib/gsm2sip")
+DATA_DIR = os.environ.get("PHONE21_DATA",
+                          os.environ.get("GSM2SIP_DATA", "/var/lib/phone21"))
 # Stav ovládání (tajemství 2FA, token brány). DATA_DIR je pro ovládání
 # READ-ONLY mount — zapisovat jde jedině sem (samostatný rw mount, adresář
 # zakládá entrypoint ústředny). Zápis kamkoli jinam v DATA_DIR selže.
@@ -367,7 +368,7 @@ MISSED_MODES = ("ring", "announce")
 def get_missed_mode():
     """Aktuální chování k volajícímu při offline telefonu (AstDB přes AMI).
     Prázdný/nečitelný klíč = default ring."""
-    out = cli("database get gsm2sip missed_mode")
+    out = cli("database get phone21 missed_mode")
     for ln in out.splitlines():
         if ln.startswith("Value:"):
             val = ln.split(":", 1)[1].strip()
@@ -379,7 +380,7 @@ def get_missed_mode():
 def get_island_mode():
     """Ostrovní režim: při výpadku primární linky vezme krabička internet
     z mobilních dat modemu. Default vypnuto (data se účtují)."""
-    out = cli("database get gsm2sip island_mode")
+    out = cli("database get phone21 island_mode")
     for ln in out.splitlines():
         if ln.startswith("Value:"):
             return "on" if ln.split(":", 1)[1].strip() == "on" else "off"
@@ -1315,7 +1316,7 @@ def page_2fa(info=""):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "gsm2sip-webui"
+    server_version = "phone21-ui"
 
     def _session_token(self):
         raw = self.headers.get("Cookie") or ""
@@ -1465,9 +1466,9 @@ class Handler(BaseHTTPRequestHandler):
             if mode not in MISSED_MODES:
                 return self._html(page('<p class="bad">[OVL-E06] Neplatný režim.</p>'))
             # Enum konstanta, žádný user input do CLI. Dialplan čte
-            # ${DB(gsm2sip/missed_mode)} — AstDB leží na persistentním volume
+            # ${DB(phone21/missed_mode)} — AstDB leží na persistentním volume
             # (astdbdir v asterisk.conf), takže volba přežije i recreate.
-            cli("database put gsm2sip missed_mode " + mode)
+            cli("database put phone21 missed_mode " + mode)
             saved = get_missed_mode()
             info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
                 else '<p class="bad">[OVL-E16] Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
@@ -1479,7 +1480,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page('<p class="bad">[OVL-E07] Neplatná volba.</p>'))
             # Smyčka wwan.sh watch se na tenhle klíč ptá před každým cyklem,
             # takže přepnutí se projeví do jednoho intervalu bez restartu.
-            cli("database put gsm2sip island_mode " + want)
+            cli("database put phone21 island_mode " + want)
             saved = get_island_mode()
             info = ('<p class="ok">Ostrovní režim: %s.</p>'
                     % ("zapnuto" if saved == "on" else "vypnuto")) \
@@ -1602,7 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
 class ProvHandler(BaseHTTPRequestHandler):
     """Jediný účel: vydat konfiguraci softphonu na jednorázový token.
     Běží bez hesla, takže nic jiného neobsluhuje."""
-    server_version = "gsm2sip-prov"
+    server_version = "phone21-prov"
 
     def log_message(self, fmt, *args):
         pass
@@ -1643,7 +1644,7 @@ def main():
         threading.Thread(target=prov.serve_forever, daemon=True).start()
         print("provisioning softphonu na :%d" % PROV_PORT, flush=True)
     srv = ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), Handler)
-    print("gsm2sip-webui na :%d" % WEBUI_PORT, flush=True)
+    print("phone21-ui na :%d" % WEBUI_PORT, flush=True)
     srv.serve_forever()
 
 

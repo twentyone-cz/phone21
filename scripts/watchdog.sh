@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GSM2SIP — watchdog modemu.
+# Phone21 — watchdog modemu.
 #
 # Driver se umí zaseknout tak, že přestane odpovídat i na holé AT a točí se
 # v restartní smyčce (`Not connected` / `Stopping by start request`). Sám se
@@ -28,12 +28,12 @@
 
 set -uo pipefail
 
-CONTAINER="${CONTAINER:-asterisk}"
+CONTAINER="${CONTAINER:-phone21-pbx}"
 DEVICE="${QUECTEL_DEVICE:-quectel0}"
-STATE_DIR="${STATE_DIR:-/opt/Gsm2Sip/runtime/smsdata}"
+STATE_DIR="${STATE_DIR:-/opt/Phone21/runtime/smsdata}"
 LOG="${STATE_DIR}/watchdog.log"
-FAILS_FILE=/run/gsm2sip-watchdog.fails
-LAST_RESTART_FILE=/run/gsm2sip-watchdog.last-restart
+FAILS_FILE=/run/phone21-watchdog.fails
+LAST_RESTART_FILE=/run/phone21-watchdog.last-restart
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"
 COOLDOWN="${COOLDOWN:-600}"
 LOG_KEEP="${LOG_KEEP:-200}"
@@ -62,7 +62,7 @@ fails=$(read_num "${FAILS_FILE}")
 # Neběžící kontejner nesmí projít mlčky: `created` = nikdy nenastartoval
 # (zkusíme docker start), `exited` = vědomé zastavení (jen hlásíme). Aby log
 # nezaplavilo 2880 řádků denně, píše se změna stavu a pak připomínka po 30 min.
-LASTSTATE_FILE=/run/gsm2sip-watchdog.laststate
+LASTSTATE_FILE=/run/phone21-watchdog.laststate
 note_state() { # $1 stav, $2 zpráva
   local last="" last_t=0 now
   now=$(date +%s)

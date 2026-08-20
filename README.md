@@ -60,7 +60,7 @@ web/phone/    produktové stránky
 ```
 
 Konfigurace se generuje ze šablon: v Dockeru/Umbrelu si ji kontejner vyrobí
-sám při startu (`GSM2SIP_SELFCONFIG=1`), jinak jednorázově `./configure.sh`.
+sám při startu (`PHONE21_SELFCONFIG=1`), jinak jednorázově `./configure.sh`.
 
 ## Dokumentace
 

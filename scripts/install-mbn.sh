@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GSM2SIP — instalace automatické správy MBN carrier profilu (VoLTE).
+# Phone21 — instalace automatické správy MBN carrier profilu (VoLTE).
 #
 #   ./install-mbn.sh             # nainstaluj systemd oneshot a hned spusť
 #   ./install-mbn.sh --status    # stav služby + aktivní profil + IMS
@@ -12,19 +12,19 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE=/etc/systemd/system/gsm2sip-mbn.service
+SERVICE=/etc/systemd/system/phone21-mbn.service
 
 die() { echo "CHYBA: $*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die "spusť jako root"
 
 case "${1:-}" in
   --status)
-    systemctl status gsm2sip-mbn.service --no-pager 2>/dev/null | head -8 || true
+    systemctl status phone21-mbn.service --no-pager 2>/dev/null | head -8 || true
     "${REPO}/scripts/mbn-profile.sh" status || true
     exit 0
     ;;
   --uninstall)
-    systemctl disable --now gsm2sip-mbn.service 2>/dev/null || true
+    systemctl disable --now phone21-mbn.service 2>/dev/null || true
     rm -f "${SERVICE}"
     systemctl daemon-reload
     echo "Správa MBN profilu odstraněna (aktivní profil se nemění)."
@@ -43,7 +43,7 @@ chmod +x "${REPO}/scripts/mbn-profile.sh"
 # u stavu, který je na bezmodemovém stroji korektní.
 cat > "${SERVICE}" <<EOF
 [Unit]
-Description=GSM2SIP: MBN carrier profil modemu dle operátora SIM (VoLTE)
+Description=Phone21: MBN carrier profil modemu dle operátora SIM (VoLTE)
 After=network.target
 
 [Service]
@@ -58,6 +58,6 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now gsm2sip-mbn.service >/dev/null
+systemctl enable --now phone21-mbn.service >/dev/null
 echo "Správa MBN profilu nainstalována."
-journalctl -u gsm2sip-mbn.service --no-pager | tail -3
+journalctl -u phone21-mbn.service --no-pager | tail -3

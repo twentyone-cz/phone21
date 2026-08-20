@@ -1,4 +1,4 @@
-# GSM2SIP — overlay: připojení brány do privátní sítě CockScale (fáze D).
+# Phone21 — overlay: připojení brány do privátní sítě CockScale (fáze D).
 #
 # Použití (LXC produkce):
 #   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
@@ -13,16 +13,16 @@
 # diagnostiku spojení na log.tailscale.io i proti headscale (issue #2793).
 
 services:
-  webui:
+  ui:
     environment:
-      TS_DIR: /var/lib/gsm2sip/ts
+      TS_DIR: /var/lib/phone21/ts
       NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/pay}
     volumes:
-      - ./runtime/smsdata/ts:/var/lib/gsm2sip/ts:rw
+      - ./runtime/smsdata/ts:/var/lib/phone21/ts:rw
 
-  tailnet:
+  net:
     image: tailscale/tailscale:v1.86.2
-    container_name: gsm2sip-tailnet
+    container_name: phone21-net
     restart: unless-stopped
     network_mode: host
     cap_add:
@@ -35,18 +35,18 @@ services:
       COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
     volumes:
       - ./runtime/ts-state:/var/lib/tailscale
-      - ./runtime/smsdata/ts:/gsm2sip-ts
+      - ./runtime/smsdata/ts:/phone21-ts
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        until [ -s /gsm2sip-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
+        until [ -s /phone21-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
         tailscaled --state=/var/lib/tailscale/tailscaled.state &
         sleep 3
-        if [ -s /gsm2sip-ts/authkey ]; then
-          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /gsm2sip-ts/authkey)" --accept-dns=false && rm -f /gsm2sip-ts/authkey
+        if [ -s /phone21-ts/authkey ]; then
+          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /phone21-ts/authkey)" --accept-dns=false && rm -f /phone21-ts/authkey
         fi
         while true; do
           ip="$$(tailscale ip -4 2>/dev/null | head -1)"
-          [ -n "$$ip" ] && echo "$$ip" > /gsm2sip-ts/ip
+          [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
           sleep 60
         done

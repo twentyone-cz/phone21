@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GSM2SIP — instalace watchdogu modemu (systemd timer).
+# Phone21 — instalace watchdogu modemu (systemd timer).
 #
 #   ./install-watchdog.sh             # nainstaluj a spusť
 #   ./install-watchdog.sh --status    # stav timeru + poslední zásahy
@@ -14,8 +14,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE=/etc/systemd/system/gsm2sip-watchdog.service
-TIMER=/etc/systemd/system/gsm2sip-watchdog.timer
+SERVICE=/etc/systemd/system/phone21-watchdog.service
+TIMER=/etc/systemd/system/phone21-watchdog.timer
 INTERVAL="${WATCHDOG_INTERVAL:-30}"
 
 die() { echo "CHYBA: $*" >&2; exit 1; }
@@ -23,7 +23,7 @@ die() { echo "CHYBA: $*" >&2; exit 1; }
 
 case "${1:-}" in
   --status)
-    systemctl status gsm2sip-watchdog.timer --no-pager 2>/dev/null | head -8 || true
+    systemctl status phone21-watchdog.timer --no-pager 2>/dev/null | head -8 || true
     echo "=== poslední kontrola (bez zásahu) ==="
     "${REPO}/scripts/watchdog.sh" --check || true
     echo "=== posledních 10 záznamů ==="
@@ -31,7 +31,7 @@ case "${1:-}" in
     exit 0
     ;;
   --uninstall)
-    systemctl disable --now gsm2sip-watchdog.timer 2>/dev/null || true
+    systemctl disable --now phone21-watchdog.timer 2>/dev/null || true
     rm -f "${SERVICE}" "${TIMER}"
     systemctl daemon-reload
     echo "Watchdog odstraněn."
@@ -45,7 +45,7 @@ esac
 
 cat > "${SERVICE}" <<EOF
 [Unit]
-Description=GSM2SIP watchdog modemu (restart kontejneru při zaseknutí driveru)
+Description=Phone21 watchdog modemu (restart kontejneru při zaseknutí driveru)
 After=docker.service
 Requires=docker.service
 
@@ -58,7 +58,7 @@ EOF
 
 cat > "${TIMER}" <<EOF
 [Unit]
-Description=GSM2SIP watchdog modemu — spouštění po ${INTERVAL} s
+Description=Phone21 watchdog modemu — spouštění po ${INTERVAL} s
 
 [Timer]
 # Po bootu se nespěchá: Asterisk potřebuje chvíli na inicializaci modemu
@@ -66,13 +66,13 @@ Description=GSM2SIP watchdog modemu — spouštění po ${INTERVAL} s
 OnBootSec=3min
 OnUnitActiveSec=${INTERVAL}s
 AccuracySec=5s
-Unit=gsm2sip-watchdog.service
+Unit=phone21-watchdog.service
 
 [Install]
 WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now gsm2sip-watchdog.timer >/dev/null
+systemctl enable --now phone21-watchdog.timer >/dev/null
 echo "Watchdog nainstalován, kontrola po ${INTERVAL} s."
-systemctl list-timers --no-legend gsm2sip-watchdog.timer
+systemctl list-timers --no-legend phone21-watchdog.timer

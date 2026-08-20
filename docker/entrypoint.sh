@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# GSM2SIP — entrypoint kontejneru asterisk.
+# Phone21 — entrypoint kontejneru asterisk.
 #
 # Dva režimy:
 #  - default: /etc/asterisk dodává bind-mount (vyrenderovaný configure.sh),
 #    entrypoint jen spustí Asterisk;
-#  - GSM2SIP_SELFCONFIG=1: konfigurace se renderuje při každém startu ze
+#  - PHONE21_SELFCONFIG=1: konfigurace se renderuje při každém startu ze
 #    šablon v image; tajemství se generují jednou a persistují ve volume.
 #
 # Volitelné interní služby (Umbrel nemá host systemd):
@@ -16,11 +16,15 @@
 #                        (potřebuje NET_ADMIN a síť hostitele)
 #
 # SIP_DOMAIN: pevná hodnota z env, nebo prázdná → čeká se (max TS_WAIT s)
-# na /var/lib/gsm2sip/ts/ip od tailscale sidecaru (tailnet IP brány).
+# na /var/lib/phone21/ts/ip od tailscale sidecaru (tailnet IP brány).
 
 set -u
-TPL=/opt/gsm2sip/templates
-DATA=/var/lib/gsm2sip
+# Přechod ze starých názvů (drží se jedno vydání): staré proměnné i starý
+# datový adresář se přeberou, když nové chybí.
+: "${PHONE21_SELFCONFIG:=${GSM2SIP_SELFCONFIG:-0}}"
+TPL=/opt/phone21/templates
+DATA="${PHONE21_DATA:-${GSM2SIP_DATA:-/var/lib/phone21}}"
+LEGACY_DATA=/var/lib/gsm2sip
 SECRETS="$DATA/secrets.env"
 TS_IP_FILE="$DATA/ts/ip"
 
@@ -123,11 +127,42 @@ render() {
 }
 
 # Společná příprava dat — běží VŽDY (i v LXC režimu bez selfkonfigurace;
-# dřív žila v render() a na nasazeních bez GSM2SIP_SELFCONFIG se nikdy
+# dřív žila v render() a na nasazeních bez PHONE21_SELFCONFIG se nikdy
 # neprovedla).
 #
 # Ovládání běží pod jiným uživatelem než ústředna: data musí umět přečíst
 # a do ts/ a webui/ i zapsat. Zprávy a fronta nejsou čitelné pro ostatní.
+# Data ze starého adresáře se přeberou jen tehdy, když nový ještě není
+# naplněný (jinak by se přepsal živý stav).
+legacy_data_migrate() {
+  [[ "$DATA" != "$LEGACY_DATA" ]] || return 0
+  [[ -d "$LEGACY_DATA" ]] || return 0
+  [[ -z "$(ls -A "$DATA" 2>/dev/null)" ]] || return 0
+  mkdir -p "$DATA" 2>/dev/null || return 0
+  if cp -a "$LEGACY_DATA/." "$DATA/" 2>/dev/null; then
+    log "data převzata ze starého adresáře $LEGACY_DATA"
+  fi
+}
+
+# Klíče v databázi ústředny (rodina gsm2sip → phone21). Běží po startu,
+# přepisovat se nic nesmí — bere se jen to, co v nové rodině chybí.
+db_migrate() {
+  sleep 45
+  local line key val
+  asterisk -rx "database show gsm2sip" 2>/dev/null | while read -r line; do
+    case "$line" in
+      /gsm2sip/*) ;;
+      *) continue ;;
+    esac
+    key="${line%%:*}"; key="${key##/gsm2sip/}"; key="${key%"${key##*[![:space:]]}"}"
+    val="${line#*: }"; val="${val#"${val%%[![:space:]]*}"}"
+    [[ -n "$key" && -n "$val" ]] || continue
+    asterisk -rx "database get phone21 $key" 2>/dev/null | grep -q "Value:" && continue
+    asterisk -rx "database put phone21 $key $val" >/dev/null 2>&1 \
+      && log "klíč $key převzat ze staré rodiny"
+  done
+}
+
 common_setup() {
   # Čas v logu: ústředna čte /etc/localtime, proměnnou TZ ne.
   if [[ -n "${TZ:-}" && -e "/usr/share/zoneinfo/$TZ" ]]; then
@@ -260,7 +295,7 @@ mbn_loop() {
           [[ -n "$mbn_v" ]] && MBN_MAP="$mbn_v"
         fi
         MBN_PROFILE="${MBN_PROFILE:-auto}" MBN_MAP="${MBN_MAP:-}" \
-          /opt/gsm2sip/scripts/mbn-profile.sh auto || true
+          /opt/phone21/scripts/mbn-profile.sh auto || true
       fi
       v="$(volte_probe || echo unknown)"
       printf '%s\n' "$v" > "$DATA/volte.tmp" 2>/dev/null \
@@ -275,29 +310,31 @@ mbn_loop() {
 # Filtr provozu z privátní sítě. Nikdy nesmí zabránit startu ústředny —
 # při selhání jen hlásí a jede se dál.
 if [[ "${FIREWALL_INTERNAL:-0}" == "1" ]]; then
-  /opt/gsm2sip/scripts/tunnel-firewall.sh apply \
+  /opt/phone21/scripts/tunnel-firewall.sh apply \
     || log "POZOR: filtr privátní sítě selhal — miniserver je z privátní sítě OTEVŘENÝ"
-  /opt/gsm2sip/scripts/tunnel-firewall.sh watch &
+  /opt/phone21/scripts/tunnel-firewall.sh watch &
 fi
 
-if [[ "${GSM2SIP_SELFCONFIG:-0}" == "1" ]]; then
+legacy_data_migrate
+if [[ "${PHONE21_SELFCONFIG:-0}" == "1" ]]; then
   render
 fi
 common_setup
+db_migrate &
 [[ "${WATCHDOG_INTERNAL:-0}" == "1" ]] && watchdog_loop &
 [[ "${MBN_INTERNAL:-0}" == "1" ]] && mbn_loop &
 # Ostrovní režim: hlídka běží vždy, ale zasáhne jen když je zapnutý
-# přepínač ve web UI (AstDB gsm2sip/island_mode); WWAN_FAILOVER je jen
+# přepínač ve web UI (AstDB phone21/island_mode); WWAN_FAILOVER je jen
 # výchozí hodnota při první instalaci.
 island_default() {
   sleep 40
   local want=off
   [[ "${WWAN_FAILOVER:-0}" == "1" ]] && want=on
-  asterisk -rx "database get gsm2sip island_mode" 2>/dev/null | grep -q "Value:" || \
-    asterisk -rx "database put gsm2sip island_mode $want" >/dev/null 2>&1
+  asterisk -rx "database get phone21 island_mode" 2>/dev/null | grep -q "Value:" || \
+    asterisk -rx "database put phone21 island_mode $want" >/dev/null 2>&1
 }
 island_default &
-/opt/gsm2sip/scripts/wwan.sh watch &
+/opt/phone21/scripts/wwan.sh watch &
 
 # Adresa v domácí síti pro QR telefonu (kontejner běží v síti hostitele).
 lan_ip_loop() {

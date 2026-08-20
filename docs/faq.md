@@ -96,3 +96,11 @@ a na dashboardu ji připomíná dlaždice. Po skončení práce ji zase vypni.
 Kdyby se filtr zachoval nečekaně, jde vypnout i z domácí sítě: do souboru
 `firewall.env` v datovém adresáři aplikace přidej řádek `FW_DISABLE=1`.
 Do minuty se filtr vypne a miniserver jede dál.
+
+## Aplikace v obchodě se přejmenovala — co s tím?
+
+Od verze 0.9.26 se aplikace v obchodě jmenuje **Phone21** a je to nová
+položka. Nainstaluj ji, přenes data z předchozí instalace (adresář
+`app-data`) a starou aplikaci pak odinstaluj — postup je na
+phone.twentyone.cz. Bez přenosu dat začneš s prázdným žurnálem zpráv,
+novým heslem k ústředně a telefon bude potřebovat nový QR kód.

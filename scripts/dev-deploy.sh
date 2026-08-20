@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GSM2SIP — nasazení na vývojovou bránu (spouští se PŘÍMO na ní, v kořeni repa).
+# Phone21 — nasazení na vývojovou bránu (spouští se PŘÍMO na ní, v kořeni repa).
 #
 #   ./scripts/dev-deploy.sh [ref]     # default: origin/main
 #
@@ -42,5 +42,5 @@ docker compose "${COMPOSE_FILES[@]}" up -d --force-recreate
 echo "== výsledek =="
 docker ps --format '{{.Names}}\t{{.Status}}'
 sleep 3
-docker logs asterisk --tail 15 2>&1 | sed 's/^/[asterisk] /' || true
-docker logs gsm2sip-webui --tail 5 2>&1 | sed 's/^/[webui] /' || true
+docker logs phone21-pbx --tail 15 2>&1 | sed 's/^/[ustredna] /' || true
+docker logs phone21-ui --tail 5 2>&1 | sed 's/^/[webui] /' || true

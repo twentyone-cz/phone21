@@ -39,15 +39,15 @@ RUN moddir="$(dirname "$(find /usr/lib -name 'chan_pjsip.so' -path '*asterisk*' 
     && rm /tmp/chan_quectel.so
 
 # Šablony a skripty zapečené v image (použijí se v režimu selfkonfigurace).
-COPY asterisk/ /opt/gsm2sip/templates/
-COPY scripts/mbn-profile.sh scripts/wwan.sh docker/tunnel-firewall.sh /opt/gsm2sip/scripts/
+COPY asterisk/ /opt/phone21/templates/
+COPY scripts/mbn-profile.sh scripts/wwan.sh docker/tunnel-firewall.sh /opt/phone21/scripts/
 # Pravidla filtru pro provoz z privátní sítě.
-COPY docker/tunnel-firewall.nft /opt/gsm2sip/tunnel-firewall.nft
+COPY docker/tunnel-firewall.nft /opt/phone21/tunnel-firewall.nft
 # sms-queue.sh musí být v obraze na cestě, kterou volá dialplan.
-COPY scripts/sms-queue.sh /usr/local/gsm2sip/sms-queue.sh
-COPY docker/entrypoint.sh /opt/gsm2sip/entrypoint.sh
-RUN chmod +x /opt/gsm2sip/entrypoint.sh /opt/gsm2sip/scripts/*.sh \
-      /usr/local/gsm2sip/sms-queue.sh
+COPY scripts/sms-queue.sh /usr/local/phone21/sms-queue.sh
+COPY docker/entrypoint.sh /opt/phone21/entrypoint.sh
+RUN chmod +x /opt/phone21/entrypoint.sh /opt/phone21/scripts/*.sh \
+      /usr/local/phone21/sms-queue.sh
 
 # Spouštět bez -G; entrypoint bez env jen spustí ústřednu.
-CMD ["/opt/gsm2sip/entrypoint.sh"]
+CMD ["/opt/phone21/entrypoint.sh"]
