@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   asterisk:
-    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.24@sha256:8afcf40cdfd0c4e013d3405bb90fb66dda363cd4bfe0377077f0d6dd011cb261
+    image: ghcr.io/twentyone-cz/gsm2sip-asterisk:0.9.25@sha256:0631dbb4d2e6dc3075079a2fd760d4c56ea1ccc1bfc04c02e6bc0e0017caa536
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
@@ -61,7 +61,7 @@ services:
     # chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.24@sha256:dde269a4b897947ea1f278e9552ba7e6c3403ada94faa7700ecc877638e41f0b
+    image: ghcr.io/twentyone-cz/gsm2sip-webui:0.9.25@sha256:8a260d5e09a7dbf5bfd9d651af48cce7e8084da42382280afa9dd39f3783bc30
     restart: on-failure
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
