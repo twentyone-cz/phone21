@@ -146,6 +146,26 @@ step "pravidla filtru mají platnou syntaxi" fw_syntax_check
 step "skript filtru je v obraze a spustitelný" \
   docker run --rm --entrypoint sh phone21-pbx:smoke \
     -c 'test -x /opt/phone21/scripts/tunnel-firewall.sh && bash -n /opt/phone21/scripts/tunnel-firewall.sh'
+fw_levels_check() {
+  # tři stupně přístupu: telefon (bílá listina), celý miniserver, i dál do sítě
+  local base=/tmp/phone21-fw-levels
+  rm -rf "$base" && mkdir -p "$base/ts"
+  run() {  # $1 = obsah volby ("" = žádná), vypíše řetězy tun_pre a fwd_pre
+    if [ -n "$1" ]; then printf '%s' "$1" > "$base/ts/tunnel_access";
+    else rm -f "$base/ts/tunnel_access"; fi
+    docker run --rm --network none --cap-add NET_ADMIN -v "$base":/var/lib/phone21 \
+      --entrypoint sh phone21-pbx:smoke -c \
+      '/opt/phone21/scripts/tunnel-firewall.sh apply >/dev/null 2>&1;
+       nft list chain inet phone21 tun_pre; nft list chain inet phone21 fwd_pre'
+  }
+  run "" | grep -q "accept" && return 1                       # výchozí: nic navíc
+  run "endpoint" | grep -q "tun_pre" || return 1
+  [ "$(run "endpoint" | grep -c "counter packets 0 bytes 0 accept")" = "1" ] || return 1
+  [ "$(run "router" | grep -c "counter packets 0 bytes 0 accept")" = "2" ] || return 1
+  return 0
+}
+step "přístup z privátní sítě má tři stupně" fw_levels_check
+
 fw_default_off_check() {
   # bez FIREWALL_INTERNAL se filtr nesmí zapnout
   ! docker logs "$AST" 2>&1 | grep -q '\[firewall\]'

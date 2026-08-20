@@ -243,13 +243,40 @@ def debug_ssh_path():
     return os.path.join(STATE_DIR, "debug_ssh")
 
 
-def debug_ssh_on():
-    """Je zapnuté ladění (vzdálená správa z privátní sítě)?"""
+ACCESS_LEVELS = ("phone", "endpoint", "router")
+ACCESS_LABEL = {
+    "phone": "jen telefon",
+    "endpoint": "celý miniserver",
+    "router": "i dál do sítě",
+}
+
+
+def access_path():
+    """Volba leží v adresáři sítě — čte ji i ústředna a sidecar sítě."""
+    return os.path.join(TS_DIR or STATE_DIR, "tunnel_access")
+
+
+def access_level():
+    """phone | endpoint | router; starý přepínač ladění = endpoint."""
+    try:
+        with open(access_path()) as f:
+            value = f.read().strip()
+        if value in ACCESS_LEVELS:
+            return value
+    except OSError:
+        pass
     try:
         with open(debug_ssh_path()) as f:
-            return f.read().strip() == "1"
+            if f.read().strip() == "1":
+                return "endpoint"
     except OSError:
-        return False
+        pass
+    return "phone"
+
+
+def debug_ssh_on():
+    """Zpětná kompatibilita: SSH je dostupné od stupně „celý miniserver“."""
+    return access_level() in ("endpoint", "router")
 
 
 def firewall_state():
@@ -1192,11 +1219,12 @@ def page_home(info=""):
            " · <b>čeká na doručení: %d</b>" % waiting if waiting else "",
            u("/sms"))))
 
-    if debug_ssh_on():
+    if access_level() != "phone":
         tiles.append(_tile(
-            "\U0001F527", "Ladění", "Zapnuto", "warn",
-            "vzdálená správa z privátní sítě je otevřená · "
-            '<a href="%s">vypnout</a>' % u("/net")))
+            "\U0001F527", "Přístup z privátní sítě",
+            esc(ACCESS_LABEL[access_level()]), "warn",
+            "miniserver pouští z privátní sítě víc než telefonování · "
+            '<a href="%s">změnit</a>' % u("/net")))
 
     calls = read_cdr(limit=1)
     tiles.append(_tile(
@@ -1416,7 +1444,6 @@ def page_net(info=""):
            u("/net/partner")))
     fw = firewall_state()
     if fw:
-        dbg = debug_ssh_on()
         if fw.startswith("active"):
             fw_txt = "zapnutý — z privátní sítě projde jen telefonování a ovládání"
             fw_cls = "ok"
@@ -1426,19 +1453,29 @@ def page_net(info=""):
         else:
             fw_txt = "CHYBA — z privátní sítě je miniserver otevřený"
             fw_cls = "bad"
-        blocks.append(
-            "<h2>Ladění přes privátní síť</h2>"
-            '<p class="small muted">Filtr provozu: <span class="%s">%s</span></p>'
-            "<p>Otevře vzdálenou správu miniserveru z privátní sítě (bez "
-            "omezení na konkrétní zařízení). Projeví se do 15 s a přežije "
-            "restart — po skončení práce vypni.</p>"
-            '<p>Stav: <b>%s</b></p>'
+        level = access_level()
+        choices = "".join(
             '<form class="inline" method="post" action="%s">'
             '<input type="hidden" name="value" value="%s">'
-            "<button>%s</button></form>"
-            % (fw_cls, esc(fw_txt), "zapnuto" if dbg else "vypnuto",
-               u("/net/debug"), "off" if dbg else "on",
-               "Vypnout ladění" if dbg else "Povolit ladění"))
+            "<button%s>%s</button></form> "
+            % (u("/net/access"), key,
+               ' class="ghost"' if key == level else "",
+               esc(ACCESS_LABEL[key]))
+            for key in ACCESS_LEVELS)
+        blocks.append(
+            "<h2>Přístup z privátní sítě</h2>"
+            '<p class="small muted">Filtr provozu: <span class="%s">%s</span></p>'
+            "<p>Telefonování, ovládání a párování telefonu jsou dostupné vždy. "
+            "Navíc lze pustit dál:</p>"
+            "<ul><li><b>jen telefon</b> — nic dalšího z miniserveru není "
+            "z privátní sítě vidět (doporučeno);</li>"
+            "<li><b>celý miniserver</b> — všechny jeho služby včetně vzdálené "
+            "správy a ostatních aplikací; dál než na miniserver se nedostane;</li>"
+            "<li><b>i dál do sítě</b> — miniserver navíc propouští provoz do "
+            "domácí sítě a ven (výstupní uzel). Aby to fungovalo, musí trasu "
+            "schválit i správa sítě.</li></ul>"
+            "<p>Stav: <b>%s</b></p>%s"
+            % (fw_cls, esc(fw_txt), esc(ACCESS_LABEL[level]), choices))
     return render("net", "".join(blocks))
 
 
@@ -2096,24 +2133,26 @@ class Handler(BaseHTTPRequestHandler):
                 '<p class="ok">Účet <b>%s</b>, heslo <span class="mono">%s'
                 "</span> — ukáže se jen teď, zapiš si ho.</p>"
                 % (esc(name), esc(password))))
-        if self.path == "/net/debug":
-            want_on = form.get("value", "") == "on"
+        if self.path == "/net/access":
+            level = form.get("value", "")
+            if level not in ACCESS_LEVELS:
+                return self._html(page_net(
+                    '<p class="bad">[OVL-E24] Neznámá volba přístupu.</p>'))
             try:
-                if want_on:
-                    write_state(debug_ssh_path(), "1")
-                    info = ('<p class="ok">Ladění zapnuto — vzdálená správa '
-                            "z privátní sítě bude otevřená do 15 s.</p>")
-                else:
-                    try:
-                        os.remove(debug_ssh_path())
-                    except FileNotFoundError:
-                        pass
-                    info = ('<p class="ok">Ladění vypnuto — vzdálená správa '
-                            "se do 15 s zavře.</p>")
-                audit("net/debug ip=%s value=%s" % (self.client_address[0],
-                                                    "on" if want_on else "off"))
+                write_state(access_path(), level)
+                # starý přepínač ladění by volbu přebíjel
+                try:
+                    os.remove(debug_ssh_path())
+                except FileNotFoundError:
+                    pass
+                audit("net/access ip=%s value=%s" % (self.client_address[0], level))
+                info = ('<p class="ok">Nastaveno: <b>%s</b>. Projeví se do 15 s '
+                        "a přežije restart.%s</p>"
+                        % (esc(ACCESS_LABEL[level]),
+                           " Trasu ještě musí schválit správa sítě."
+                           if level == "router" else ""))
             except OSError as e:
-                info = ('<p class="bad">[OVL-E23] Nejde uložit volbu ladění: '
+                info = ('<p class="bad">[OVL-E23] Nejde uložit volbu přístupu: '
                         "%s</p>" % esc(e))
             return self._html(page_net(info))
         if self.path == "/diag/at":

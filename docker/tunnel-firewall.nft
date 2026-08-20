@@ -14,13 +14,17 @@ delete table inet phone21
 
 table inet phone21 {
 
-  # Prázdný řetěz; pravidlo pro vzdálenou správu do něj přidává
-  # tunnel-firewall.sh, když je v ovládání zapnuté ladění.
-  chain tun_debug {
+  # Prázdné řetězy; podle zvoleného přístupu do nich tunnel-firewall.sh
+  # přidá pravidlo, které pustí dál všechno.
+  chain tun_pre {
+  }
+
+  chain fwd_pre {
   }
 
   # Provoz z privátní sítě do miniserveru.
   chain tun_in {
+    jump tun_pre
     ct state established,related accept
     ct state invalid drop
     ip protocol icmp accept
@@ -29,7 +33,6 @@ table inet phone21 {
     tcp dport $SIP_PORT counter accept
     udp dport $RTP_PORTS counter accept
     tcp dport $TUN_TCP counter accept
-    jump tun_debug
     limit rate 5/minute burst 5 packets log prefix "phone21-fw in: "
     counter drop
   }
@@ -37,6 +40,7 @@ table inet phone21 {
   # Provoz z privátní sítě dál (do kontejnerů a do domácí sítě).
   # Publikované porty sem přijdou po překladu adresy.
   chain tun_fwd {
+    jump fwd_pre
     ct state established,related accept
     ct state invalid drop
     ct status dnat tcp dport $TUN_TCP counter accept

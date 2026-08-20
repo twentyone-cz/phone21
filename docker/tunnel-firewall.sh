@@ -3,7 +3,7 @@
 # Phone21 — zapnutí a hlídání filtru provozu z privátní sítě.
 #
 #   tunnel-firewall.sh apply    načte pravidla (respektuje FW_DISABLE a ladění)
-#   tunnel-firewall.sh watch    smyčka: reaguje na změnu ladění i firewall.env
+#   tunnel-firewall.sh watch    smyčka: reaguje na změnu přístupu i firewall.env
 #   tunnel-firewall.sh check    jen ověří syntaxi pravidel (smoke test)
 #   tunnel-firewall.sh status   vypíše stav
 #   tunnel-firewall.sh off      pravidla odstraní
@@ -15,7 +15,8 @@ GEN=/run/phone21-fw.nft
 ERRLOG=/run/phone21-fw.err
 STATE="$DATA/firewall"
 ENVFILE="$DATA/firewall.env"
-DEBUG_FLAG="$DATA/webui/debug_ssh"
+ACCESS_FILE="$DATA/ts/tunnel_access"
+LEGACY_DEBUG="$DATA/webui/debug_ssh"
 TABLE="inet phone21"
 INTERVAL="${FW_WATCH_INTERVAL:-15}"
 
@@ -30,9 +31,27 @@ read_env() {
   printf '%s' "$v"
 }
 
-debug_on() {
-  [[ -f "$DEBUG_FLAG" ]] || return 1
-  [[ "$(tr -d '[:space:]' < "$DEBUG_FLAG" 2>/dev/null)" == "1" ]]
+# Zvolený přístup z privátní sítě: phone | endpoint | router.
+# Starý přepínač ladění se překládá na endpoint (SSH je služba miniserveru).
+access_level() {
+  local value=""
+  [[ -f "$ACCESS_FILE" ]] && value="$(tr -d '[:space:]' < "$ACCESS_FILE" 2>/dev/null)"
+  case "$value" in
+    endpoint|router|phone) printf '%s' "$value"; return 0 ;;
+  esac
+  if [[ -f "$LEGACY_DEBUG" && "$(tr -d '[:space:]' < "$LEGACY_DEBUG" 2>/dev/null)" == "1" ]]; then
+    printf 'endpoint'
+  else
+    printf 'phone'
+  fi
+}
+
+access_label() {
+  case "$1" in
+    endpoint) printf 'celý miniserver' ;;
+    router)   printf 'i dál do sítě' ;;
+    *)        printf 'jen telefon' ;;
+  esac
 }
 
 set_state() {
@@ -49,9 +68,15 @@ table_present() { nft list table $TABLE >/dev/null 2>&1; }
 generate() {
   umask 077
   cp "$RULES" "$GEN" || return 1
-  if debug_on; then
-    printf '\nadd rule inet phone21 tun_debug tcp dport 22 counter accept\n' >> "$GEN"
-  fi
+  case "$(access_level)" in
+    endpoint)
+      printf '\nadd rule inet phone21 tun_pre counter accept\n' >> "$GEN"
+      ;;
+    router)
+      printf '\nadd rule inet phone21 tun_pre counter accept\n' >> "$GEN"
+      printf 'add rule inet phone21 fwd_pre counter accept\n' >> "$GEN"
+      ;;
+  esac
 }
 
 load() { nft -f "$GEN" 2>"$ERRLOG"; }
@@ -63,8 +88,17 @@ load_without_log() {
 }
 
 apply() {
-  local dbg="vypnuto"
-  debug_on && dbg="zapnuto"
+  local level dbg
+  level="$(access_level)"
+  dbg="$(access_label "$level")"
+  # průchod paketů je potřeba jen pro poslední stupeň; na hostiteli ho
+  # obvykle zapíná už docker
+  if [[ "$level" == "router" ]]; then
+    if [[ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" != "1" ]]; then
+      sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 \
+        || log "POZOR: průchod paketů je vypnutý a nejde zapnout — na hostiteli: sysctl -w net.ipv4.ip_forward=1"
+    fi
+  fi
 
   if [[ "$(read_env FW_DISABLE)" == "1" ]]; then
     nft delete table $TABLE 2>/dev/null || true
@@ -76,8 +110,8 @@ apply() {
   generate || { set_state "error"; log "POZOR: pravidla se nepodařilo připravit — brána je z privátní sítě OTEVŘENÁ"; return 1; }
 
   if load || load_without_log; then
-    set_state "active $(date '+%Y-%m-%d %H:%M:%S') ladeni=$dbg"
-    log "aktivní (ladění: $dbg)"
+    set_state "active $(date '+%Y-%m-%d %H:%M:%S') pristup=$dbg"
+    log "aktivní (přístup: $dbg)"
     return 0
   fi
 
@@ -90,7 +124,7 @@ watch_loop() {
   local last_env="" last_dbg="" cur_env cur_dbg cur_dis
   while true; do
     cur_env="$(stat -c %Y "$ENVFILE" 2>/dev/null || echo 0)"
-    cur_dbg=off; debug_on && cur_dbg=on
+    cur_dbg="$(access_level)"
     cur_dis="$(read_env FW_DISABLE)"
     if [[ "$cur_env" != "$last_env" || "$cur_dbg" != "$last_dbg" ]] \
        || { [[ "$cur_dis" != "1" ]] && ! table_present; }; then

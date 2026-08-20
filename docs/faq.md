@@ -8,7 +8,9 @@ privátní sítě to místo zabere. Obojí naráz proto nejde spustit vedle sebe
 Co s tím:
 
 - **Výstupní uzel uvnitř privátní sítě** — provoz telefonu jde ven přes
-  vybrané zařízení v síti a jednu aplikaci tím zastanou obě role.
+  vybrané zařízení v síti a jednu aplikaci tím zastanou obě role. Od verze
+  0.9.31 to zvládne i sám miniserver: v ovládání na záložce Síť přepni
+  přístup na **i dál do sítě** (trasu ještě musí schválit správa sítě).
 - **Druhý uživatelský profil** na telefonu — limit platí na profil, takže
   v jednom může běžet komerční VPN a v druhém miniserver.
 
@@ -61,12 +63,19 @@ Ne. Do privátní sítě jde jen provoz na miniserver — hovory, zprávy a jeho
 web UI. Všechno ostatní (web, e-mail, streamování) jde z telefonu
 normálně mimo privátní síť a miniserver o tom nic neví.
 
-Obráceně to platí taky: miniserver nepustí provoz z privátní sítě dál do
-domácí sítě ani do internetu. Telefon se přes něj tedy nedostane nikam
-jinam než k němu samotnému — není to router ani výstupní uzel. Od verze
-0.9.25 si to miniserver **sám vynucuje**: z privátní sítě přijímá jen to,
-co telefon potřebuje (hovory, zprávy, ovládání a párování telefonu),
-ostatní služby jsou z privátní sítě zavřené. Domácí sítě se to netýká.
+Obráceně to ve výchozím nastavení platí taky: miniserver nepustí provoz
+z privátní sítě dál do domácí sítě ani do internetu a z jeho vlastních
+služeb je vidět jen to, co telefon potřebuje. Od verze 0.9.25 si to
+vynucuje sám, od 0.9.31 se to dá v ovládání (záložka Síť) povolit ve třech
+stupních:
+
+- **jen telefon** (výchozí) — hovory, zprávy, ovládání, párování;
+- **celý miniserver** — všechny jeho služby (dashboard, další aplikace,
+  vzdálená správa); dál než na miniserver se pořád nedostaneš;
+- **i dál do sítě** — miniserver propouští provoz do domácí sítě a ven,
+  tedy funguje i jako výstupní uzel.
+
+Domácí sítě se filtr netýká v žádném stupni.
 
 Výjimkou je, když si výstupní uzel zapneš sám (viz otázka o komerční VPN
 výš) — pak přes něj jde všechno, protože přesně o to jde.

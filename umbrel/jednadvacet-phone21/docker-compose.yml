@@ -125,9 +125,20 @@ services:
         if [ -s /phone21-ts/authkey ]; then
           tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /phone21-ts/authkey)" --accept-dns=false && rm -f /phone21-ts/authkey
         fi
+        # výstupní uzel se nabízí jen při volbě „i dál do sítě" v ovládání
+        last=""
         while true; do
           ip="$$(tailscale ip -4 2>/dev/null | head -1)"
           [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
+          want="$$(cat /phone21-ts/tunnel_access 2>/dev/null)"
+          [ "$$want" = "router" ] || want="off"
+          if [ "$$want" != "$$last" ]; then
+            if [ "$$want" = "router" ]; then
+              tailscale set --advertise-exit-node=true && last="$$want"
+            else
+              tailscale set --advertise-exit-node=false && last="$$want"
+            fi
+          fi
           sleep 60
         done
 
