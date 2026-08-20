@@ -6,7 +6,7 @@
 #
 # Stejný ověřený vzor jako v host-setup.sh: čtecí fd se otevře dřív, než se
 # příkaz pošle, vše v jednom procesu — odpověď se neztratí. Nepoužívat, když
-# běží kontejner asterisk (drží AT port): sudo docker compose down, nebo
+# běží kontejner ústředny (drží servisní port): sudo docker compose down, nebo
 # posílat příkazy přes: asterisk -rx 'quectel cmd quectel0 AT+...'
 
 set -u
