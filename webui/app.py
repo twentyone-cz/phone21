@@ -520,6 +520,7 @@ def dav_hash(password):
 
 
 def dav_new_password(groups=4):
+    import secrets as _s
     return "-".join(
         "".join(_s.choice(_PROV_ALPHABET) for _ in range(4)) for _ in range(groups)
     )

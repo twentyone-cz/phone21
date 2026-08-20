@@ -44,23 +44,49 @@ jde rozumně poslat jen pár kusů. Použij tedy jednu z těchto cest:
    tom, zda se do vCard dostane vlastnost `PHOTO`. Po importu si projdi pár
    kontaktů, u kterých fotku čekáš.
 
-### B. Přenos souboru
+### B. Kam soubor nahrát
 
-1. `.vcf` přenes USB kabelem (MTP) nebo přes **LocalSend** (F-Droid) po Wi-Fi.
-   Ne přes cizí cloud — je to celý adresář.
+Od verze 0.9.27 drží kontakty i kalendář **miniserver** a telefon se s ním
+synchronizuje — kontakty pak nejsou jen v jednom telefonu a přežijí jeho
+ztrátu. Postup:
 
-### C. Import do lokálního úložiště
+1. V ovládání miniserveru otevři záložku **Kontakty a kalendář** a založ
+   účet pro každé zařízení (heslo se ukáže jen jednou — zapiš si ho).
+2. Ve stejné záložce nahraj `.vcf` (kontakty) nebo `.ics` (kalendář).
+   Import běží na pozadí a ukazuje průběh; položky, které už na
+   miniserveru jsou, se přeskočí, takže import jde klidně zopakovat.
+3. Soubor přenes do počítače, ze kterého ovládání otevíráš — USB kabelem
+   (MTP) nebo přes **LocalSend** (F-Droid) po Wi-Fi. Ne přes cizí cloud,
+   je to celý adresář.
 
-1. **Doporučeno: Fossify Contacts** (F-Droid, `org.fossify.contacts`):
-   Settings → **Import contacts** → vybrat `.vcf` → cíl **Phone storage /
-   lokální úložiště** (ne účet). Zvládá vCard 3.0/4.0 spolehlivě.
-2. AOSP Contacts (předinstalovaná) to umí taky (Fix & manage → Settings →
-   Import), ale jsou opakovaná hlášení o zaseknutí na 1 % / „format isn't
-   supported" u větších moderních vCard. Když se to stane,
-   použij Fossify — zapisuje do stejného systémového ContactsProvider,
-   výsledek vidí všechny aplikace.
-3. Kontakty bez účtu = lokální/Device kontakty — žádný sync, viditelné pro
-   každou app s oprávněním Kontakty. Přesně to chceme.
+### C. Nastavení telefonu na synchronizaci
+
+**Android:** nainstaluj synchronizační aplikaci **DAVx⁵** (F-Droid),
+přidej účet volbou *Přihlásit se pomocí URL a jména*, vlož adresu
+z ovládání (záložka Kontakty a kalendář ji vypisuje pro domácí i privátní
+síť), jméno účtu a heslo. Potvrď nešifrované spojení v domácí síti
+a zapni synchronizaci **Kontaktů** i **Kalendáře**. Na telefonu s více
+profily to udělej v každém profilu zvlášť.
+
+**iPhone:** Nastavení → Aplikace → Kontakty → Účty → Přidat účet → Jiné →
+Přidat účet CardDAV. Server je adresa z ovládání bez `http://`,
+v *Upřesnit* vypni SSL a nastav port 5232. Kalendář stejně, jen přes
+CalDAV. *(Přesné názvy položek se mezi verzemi iOS liší.)*
+
+Mimo domov funguje synchronizace jen tehdy, když je telefon připojený do
+privátní sítě.
+
+### C2. Varianta bez synchronizace (jen do telefonu)
+
+Když synchronizaci nechceš, jde `.vcf` naimportovat přímo do telefonu:
+**Fossify Contacts** (F-Droid) → Settings → *Import contacts* → vybrat
+soubor → cíl **Phone storage / lokální úložiště** (ne účet). Zvládá
+vCard 3.0/4.0 spolehlivě. AOSP Kontakty to umí taky (Fix & manage →
+Settings → Import), ale u větších moderních vCard jsou opakovaná hlášení
+o zaseknutí na 1 % / „format isn't supported".
+
+Kontakty bez účtu jsou lokální — žádná synchronizace, viditelné pro každou
+aplikaci s oprávněním Kontakty.
 
 ### D. Ověření a přístup pro aplikaci Phone21
 

@@ -104,3 +104,24 @@ položka. Nainstaluj ji, přenes data z předchozí instalace (adresář
 `app-data`) a starou aplikaci pak odinstaluj — postup je na
 phone.twentyone.cz. Bez přenosu dat začneš s prázdným žurnálem zpráv,
 novým heslem k ústředně a telefon bude potřebovat nový QR kód.
+
+## Co se stane s kontakty, když přijdu o telefon?
+
+Od verze 0.9.27 mohou kontakty i kalendář žít na miniserveru a telefon je
+s ním jen synchronizuje. Nový telefon si po nastavení účtu stáhne všechno
+zpátky. Účty pro jednotlivá zařízení se zakládají v ovládání na záložce
+*Kontakty a kalendář*, kde se dá i naimportovat záloha ze starého telefonu.
+
+## Proč se kontakty mimo domov nesynchronizují?
+
+Synchronizace jde na adresu miniserveru — doma po wifi, mimo domov přes
+privátní síť. Když privátní síť na telefonu neběží, synchronizace počká.
+Od verze 21p.32 umí aplikace pustit do privátní sítě i synchronizační
+aplikaci; bez toho se synchronizuje jen doma.
+
+## Jsou kontakty na miniserveru šifrované?
+
+V domácí síti jde přenos nešifrovaně po wifi (nikam ven neopouští tvůj
+byt), mimo domov jde přes šifrovanou privátní síť. Na disku miniserveru
+leží kontakty v otevřené podobě — ochranou je šifrovaný disk miniserveru,
+ne aplikace.
