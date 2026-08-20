@@ -17,7 +17,7 @@
 
 services:
   pbx:
-    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.25
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.27
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -66,7 +66,7 @@ services:
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
 
   ui:
-    image: ghcr.io/twentyone-cz/phone21-ui:0.9.25
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.27
     build: ./webui
     container_name: phone21-ui
     restart: unless-stopped
