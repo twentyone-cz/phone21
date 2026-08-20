@@ -186,6 +186,13 @@ items = mod.split_ics(ics)
 assert len(items) == 1, items
 assert mod.DAV_USER_RE.match("petr") and not mod.DAV_USER_RE.match("_x")
 assert not mod.DAV_USER_RE.match("Petr Novak")
+# vizitka bez jména musí jméno dostat, jinak ji úložiště odmítne (400)
+def fn_of(raw):
+    uid, card = mod.split_vcards(raw + "\n")[0]
+    return [l for l in card.split("\r\n") if l.startswith("FN:")][0]
+assert fn_of("BEGIN:VCARD\nVERSION:3.0\nN:Novak;Petr;;;\nTEL:+420111\nEND:VCARD") == "FN:Petr Novak"
+assert fn_of("BEGIN:VCARD\nVERSION:3.0\nTEL:+420222\nEND:VCARD") == "FN:+420222"
+assert fn_of("BEGIN:VCARD\nVERSION:3.0\nFN:Beze zmeny\nTEL:+420333\nEND:VCARD") == "FN:Beze zmeny"
 PY
 }
 step "dělení kontaktů a kalendáře funguje" dav_split_check

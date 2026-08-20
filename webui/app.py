@@ -634,6 +634,57 @@ def dav_user_del(name, drop_data=False):
     return ""
 
 
+def _vcard_unescape_qp(value, params):
+    """Hodnota kódovaná quoted-printable (staré vizitky z telefonů)."""
+    if "QUOTED-PRINTABLE" not in params.upper():
+        return value
+    try:
+        import quopri
+        charset = "utf-8"
+        for part in params.split(";"):
+            if part.upper().startswith("CHARSET="):
+                charset = part.split("=", 1)[1].strip()
+        return quopri.decodestring(value.encode()).decode(charset, "replace")
+    except Exception:
+        return value
+
+
+def _vcard_prop(lines, name):
+    """(hodnota, parametry) první vlastnosti daného jména."""
+    prefix = name.upper()
+    for line in lines:
+        head, sep, value = line.partition(":")
+        if not sep:
+            continue
+        pname = head.split(";", 1)[0].strip().upper()
+        if pname == prefix:
+            return value, head
+    return "", ""
+
+
+def _vcard_display_name(lines):
+    """Jméno pro FN: ze jména, firmy, přezdívky, jinak z čísla."""
+    value, params = _vcard_prop(lines, "N")
+    if value:
+        parts = [_vcard_unescape_qp(x, params).strip()
+                 for x in value.split(";")]
+        while len(parts) < 5:
+            parts.append("")
+        name = " ".join(x for x in (parts[3], parts[1], parts[2], parts[0], parts[4]) if x)
+        if name.strip():
+            return name.strip()
+    for prop in ("ORG", "NICKNAME", "TEL", "EMAIL"):
+        value, params = _vcard_prop(lines, prop)
+        value = _vcard_unescape_qp(value, params).split(";")[0].strip()
+        if value:
+            return value
+    return "Kontakt"
+
+
+def _vcard_escape(value):
+    return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+
+
 def split_vcards(text):
     """Rozdělí .vcf na jednotlivé vizitky; chybějící UID doplní."""
     out = []
@@ -644,6 +695,12 @@ def split_vcards(text):
         elif current:
             current.append(line)
             if line.strip().upper().startswith("END:VCARD"):
+                # vizitka bez jména je pro úložiště neplatná — doplní se
+                # ze jména, firmy nebo čísla, ať se kontakt neztratí
+                if not any(ln.split(";", 1)[0].split(":", 1)[0].strip().upper() == "FN"
+                           for ln in current):
+                    current.insert(
+                        1, "FN:" + _vcard_escape(_vcard_display_name(current)))
                 card = "\r\n".join(current)
                 uid = ""
                 for entry in current:
