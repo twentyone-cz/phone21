@@ -93,7 +93,7 @@ services:
       # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
       - ${APP_DATA_DIR}/data/smsdata/webui:/var/lib/phone21/webui:rw
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk:ro
-      - ${APP_DATA_DIR}/data/dav/config:/var/lib/phone21-dav:0.9.29@sha256:a69a91e3aeeef1e03fddbfb33effd3ee00563501222c5361ae444785d1533a06
+      - ${APP_DATA_DIR}/data/dav/config:/var/lib/phone21-dav:rw
 
   net:
     # Sidecar privátní sítě (login server CockScale, telemetrie vypnutá).

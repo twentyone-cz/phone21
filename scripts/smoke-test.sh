@@ -55,6 +55,19 @@ yaml.safe_load(open("umbrel/phone21/docker-compose.yml"))
 PYEOF
 }
 step "umbrel compose je validní YAML" umbrel_yaml_check
+umbrel_compose_check() {
+  # docker compose musí soubor přijmout i s dosazenými proměnnými —
+  # odhalí rozbité připojení adresářů (např. "too many colons")
+  APP_DATA_DIR=/tmp/p21-check APP_PASSWORD=x \
+    docker compose -f umbrel/jednadvacet-phone21/docker-compose.yml config >/dev/null
+}
+step "umbrel compose projde přes docker compose config" umbrel_compose_check
+mount_spec_check() {
+  # každý řádek připojení musí končit cestou, případně :ro/:rw
+  ! grep -E "^\s+- \\$\{APP_DATA_DIR\}[^ ]*" umbrel/jednadvacet-phone21/docker-compose.yml \
+    | grep -vE ":(ro|rw)$|:[^:]+$"
+}
+step "připojené adresáře mají platný zápis" mount_spec_check
 
 # --- 2. build obrazů -------------------------------------------------------
 step "build obrazu ústředny" \
