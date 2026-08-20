@@ -738,9 +738,12 @@ def dav_import_run(user, kind, items):
                 _dav_import["skipped"] += 1
             else:
                 _dav_import["failed"] += 1
+                detail = data[:120].decode("utf-8", "replace").replace("\n", " ") \
+                    if isinstance(data, bytes) else ""
                 if len(_dav_import["errors"]) < 20:
                     _dav_import["errors"].append(
-                        "%s → %s" % (uid[:40], status))
+                        "%s → %s %s" % (uid[:40], status, detail))
+                audit("dav import chyba %s status=%s %s" % (uid[:40], status, detail))
     with _dav_lock:
         _dav_import["running"] = False
     audit("dav import %s hotovo done=%d skip=%d fail=%d" % (
@@ -1816,7 +1819,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_phone())
         if self.path == "/net" and TS_DIR:
             return self._html(page_net())
-        if self.path == "/dav" and DAV_ENABLED:
+        if self.path.startswith("/dav") and DAV_ENABLED:
+            # i po odeslání formuláře zůstává v adrese /dav/... — obnovení
+            # stránky (i to automatické během importu) musí ukázat stav
             return self._html(page_dav())
         if self.path == "/diag":
             # technický záznam jen v expert režimu
