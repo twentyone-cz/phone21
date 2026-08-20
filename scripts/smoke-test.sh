@@ -162,9 +162,12 @@ fw_levels_check() {
        nft list chain inet phone21 tun_pre; nft list chain inet phone21 fwd_pre'
   }
   run "" | grep -q "accept" && return 1                       # výchozí: nic navíc
-  run "endpoint" | grep -q "tun_pre" || return 1
-  [ "$(run "endpoint" | grep -c "counter packets 0 bytes 0 accept")" = "1" ] || return 1
-  [ "$(run "router" | grep -c "counter packets 0 bytes 0 accept")" = "2" ] || return 1
+  # celý miniserver: vstup bez omezení + publikované porty aplikací
+  run "endpoint" | grep -q "ct status dnat counter" || return 1
+  [ "$(run "endpoint" | grep -c "accept")" = "2" ] || return 1
+  # i dál do sítě: průchod bez omezení (žádná podmínka na překlad adresy)
+  run "router" | grep -q "ct status dnat" && return 1
+  [ "$(run "router" | grep -c "accept")" = "2" ] || return 1
   return 0
 }
 step "přístup z privátní sítě má tři stupně" fw_levels_check

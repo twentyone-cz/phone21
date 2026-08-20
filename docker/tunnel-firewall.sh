@@ -70,7 +70,10 @@ generate() {
   cp "$RULES" "$GEN" || return 1
   case "$(access_level)" in
     endpoint)
+      # všechny služby miniserveru: přímo na hostiteli i publikované porty
+      # aplikací v mostové síti (ty chodí přes forward po překladu adresy)
       printf '\nadd rule inet phone21 tun_pre counter accept\n' >> "$GEN"
+      printf 'add rule inet phone21 fwd_pre ct status dnat counter accept\n' >> "$GEN"
       ;;
     router)
       printf '\nadd rule inet phone21 tun_pre counter accept\n' >> "$GEN"

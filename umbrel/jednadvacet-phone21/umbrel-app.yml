@@ -3,7 +3,7 @@ id: jednadvacet-phone21
 category: networking
 icon: https://phone.twentyone.cz/img/phone21-icon.svg
 name: Phone21
-version: "0.9.31"
+version: "0.9.32"
 tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
   Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
@@ -35,12 +35,6 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Nová volba na záložce Síť: co všechno je z privátní sítě dostupné.
-  Telefonování a ovládání vždy; navíc se dá pustit celý miniserver
-  (dashboard, další aplikace, vzdálená správa), nebo i průchod dál do
-  domácí sítě a ven — pak miniserver umí sloužit jako výstupní uzel, takže
-  na telefonu nemusíš volit mezi ním a komerční VPN.
-
-
-  Výchozí zůstává nejpřísnější stupeň. Samostatný přepínač „Povolit
-  ladění" zanikl — vzdálená správa je součástí stupně „celý miniserver".
+  Doplnění k volbě přístupu: stupeň „celý miniserver" teď opravdu zpřístupní
+  i ostatní aplikace miniserveru (dashboard, uzel, peněženka), ne jen služby
+  telefonu a vzdálenou správu.
