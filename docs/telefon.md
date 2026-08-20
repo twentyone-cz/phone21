@@ -55,8 +55,8 @@ jde rozumně poslat jen pár kusů. Použij tedy jednu z těchto cest:
    Settings → **Import contacts** → vybrat `.vcf` → cíl **Phone storage /
    lokální úložiště** (ne účet). Zvládá vCard 3.0/4.0 spolehlivě.
 2. AOSP Contacts (předinstalovaná) to umí taky (Fix & manage → Settings →
-   Import), ale na GrapheneOS fóru jsou opakovaná hlášení o zaseknutí na 1 %
-   / „format isn't supported" u větších moderních vCard. Když se to stane,
+   Import), ale jsou opakovaná hlášení o zaseknutí na 1 % / „format isn't
+   supported" u větších moderních vCard. Když se to stane,
    použij Fossify — zapisuje do stejného systémového ContactsProvider,
    výsledek vidí všechny aplikace.
 3. Kontakty bez účtu = lokální/Device kontakty — žádný sync, viditelné pro
@@ -65,13 +65,29 @@ jde rozumně poslat jen pár kusů. Použij tedy jednu z těchto cest:
 ### D. Ověření a přístup pro aplikaci Phone21
 
 1. V Kontaktech zkontroluj počet, diakritiku (Řehoř, Šťastný…), pár čísel.
-2. Přístup pro aplikaci Phone21 na GrapheneOS:
-   - **Plné oprávnění Contacts** — vidí celý adresář → caller-ID funguje
-     pro všechno. Pro tenhle účel praktická volba.
-   - **Contact Scopes** — app si myslí, že oprávnění má, ale vidí jen ručně
-     přidané kontakty/skupiny (read-only). Bezpečnostně hezké, pro
-     caller-ID celého adresáře nepraktické (volba „vše" neexistuje).
+2. Přístup pro aplikaci Phone21 ke kontaktům:
+   - **Plné oprávnění Kontakty** — vidí celý adresář → jméno se zobrazí
+     u každého hovoru i zprávy. Pro tenhle účel praktická volba.
+   - **Omezený přístup ke kontaktům** — některé varianty Androidu umí
+     místo plného oprávnění vybrat jen konkrétní kontakty; aplikace pak
+     vidí jen je, a to jen ke čtení. Bezpečnostně hezké, pro párování
+     jmen z celého adresáře nepraktické (volba „vše" neexistuje).
 3. Test: zavolej si z čísla, které je v kontaktech — musí se zobrazit jméno.
+
+### E. Nové kontakty založené v aplikaci Phone21
+
+Od verze **21p.30** aplikace nezakládá kontakty „jen u sebe": nový nebo
+upravený kontakt jde rovnou do **adresáře telefonu**, tedy tam, kam ho
+uloží i systémové Kontakty. Důsledky:
+
+- kontakt vidí i ostatní aplikace a **auto přes Bluetooth** (jméno na
+  displeji, seznam kontaktů v autě),
+- kontakty založené ve starších verzích aplikace se při první aktualizaci
+  jednorázově přenesly do adresáře telefonu (dělá se samo, nic nenastavuj),
+- smazání kontaktu v aplikaci ho smaže i z adresáře telefonu.
+
+Čísla drž v mezinárodním tvaru **+420…** — párování volajícího na jméno je
+na něm nejspolehlivější.
 
 ### Gotchas
 
@@ -85,14 +101,12 @@ jde rozumně poslat jen pár kusů. Použij tedy jednu z těchto cest:
 - **Formát čísel:** drž **+420… (E.164)** — párování volajícího je na E.164
   nejspolehlivější (a sedí na to, co posílá miniserver). Sjednotit jde
   hromadně v Google Contacts (Merge & fix) ještě před exportem.
-- **Profily GrapheneOS:** kontakty jsou per-profil — importuj v profilu, kde
-  běží aplikace Phone21.
+- **Uživatelské profily telefonu:** kontakty jsou per-profil — importuj
+  v tom profilu, kde běží aplikace Phone21.
 
 Zdroje: [export Google kontaktů](https://support.google.com/contacts/answer/7199294),
 [export vCard z iCloudu](https://support.apple.com/guide/icloud-web-only/mmfba748b2/icloud),
-[GrapheneOS Contact Scopes](https://grapheneos.org/features#contact-scopes),
-[Fossify Contacts](https://f-droid.org/en/packages/org.fossify.contacts/),
-diskuse GrapheneOS fóra k AOSP importu (33874, 32624, 12991, 4365).
+[Fossify Contacts](https://f-droid.org/en/packages/org.fossify.contacts/).
 
 ## 2. Párování SMS a hovorů na jména
 
@@ -128,12 +142,17 @@ Aplikace Phone21 si typ připojení i všechny ostatní parametry nastaví sama
 z QR kódu tak, aby hovory a zprávy chodily spolehlivě i když telefon šetří
 baterii. Zbývá pár kroků, které za tebe udělat nemůže:
 
-1. Android → Nastavení → **VPN** → aplikace Phone21 → zapnout
-   **Always-on VPN**.
-2. Android → Aplikace → Phone21 → **Baterie: Neomezeno** (aplikace musí
-   smět běžet na pozadí i ve spánku telefonu).
-3. Povolit **oznámení** pro aplikaci Phone21 — jinak nepřijde upozornění
+1. Android → Aplikace → Phone21 → **Baterie: Neomezeno** (aplikace musí
+   smět běžet na pozadí i ve spánku telefonu). Od verze 21p.31 si o to
+   aplikace řekne sama systémovým dialogem hned po nastavení účtu; stav
+   ukazuje obrazovka *Konexe* řádkem „Běh na pozadí".
+2. Povolit **oznámení** pro aplikaci Phone21 — jinak nepřijde upozornění
    na hovor ani zprávu.
+
+Systémovou volbu **Always-on VPN** nehledej — aplikace ji od verze 21p.26
+záměrně nenabízí (spolu s ní by šlo omylem zapnout „Blokovat připojení bez
+VPN", které telefon odřízne od internetu). Připojení k privátní síti se po
+restartu telefonu obnoví samo.
 
 **Zmeškané hovory:** když je telefon nedostupný, miniserver pošle do
 aplikace zprávu „Zmeškaný hovor v HH:MM" od čísla volajícího; doručí se po
@@ -142,16 +161,27 @@ přepíná v ovládání miniserveru.
 
 ## 4. Handsfree v autě (Bluetooth HFP / Android Auto)
 
-Poctivá tabulka:
+Poctivá tabulka (stav od 21p.28):
 
 | Přání | Jde? | Jak / proč ne |
 |---|---|---|
-| Hovory přes handsfree (klasické Bluetooth) | **ANO** | Aplikace Phone21 se vždy napojuje na telefonování v systému telefonu, takže hovory jdou do handsfree normálně: vyzvánění v autě, příjem/zavěšení z volantu, zvuk přes reproduktory auta, jméno kontaktu na displeji — bez toho, aby byla Phone21 nastavená jako výchozí telefonní appka. |
-| Phone21 jako **výchozí telefonní appka** (systémový vytáčeč) | **NE (a nevadí to)** | Pro handsfree to není potřeba (viz výše). Rub: hovory přes Phone21 nejsou v systémovém seznamu hovorů, takže „poslední hovory" v autě zůstanou prázdné a z obrazovky auta se nedá vytáčet — historie hovorů je v aplikaci, vytáčej z telefonu. |
-| **Android Auto** (obrazovka auta) | **NE** | Dva nezávislé důvody: (1) Android Auto potřebuje Google Play (na GrapheneOS jen přes sandboxed Play, jinak vůbec) a (2) hlasové volání v Android Auto Google zatím pouští jen do vlastního beta programu, veřejně to zapnout nejde. |
-| **SMS v autě** (čtení/odpověď) | **NE** | Bluetooth do auta posílá jen klasické SMS z telefonu — zprávy z aplikace Phone21 do nich technicky nejdou dostat. V Android Auto by to šlo, ale ten bez Google Play neběží (viz výš). |
+| Hovory přes handsfree (klasické Bluetooth) | **ANO** | Aplikace Phone21 se vždy napojuje na telefonování v systému telefonu, takže hovory jdou do handsfree normálně: vyzvánění v autě, příjem/zavěšení z volantu, zvuk přes reproduktory auta, jméno kontaktu na displeji (od 21p.28 se autu hlásí telefonní číslo, ne interní adresa — párování se jmény je spolehlivější). |
+| **Historie hovorů na displeji auta** | **ANO (21p.28, přepínač)** | Privátní síť → „Historie hovorů do auta" + povolit oprávnění. Ukončené hovory se zapisují i do historie telefonu, odkud si je auto čte (PBAP). Jména ukazuje auto z kontaktů telefonu — u auta musí být povolené „Sdílení kontaktů". |
+| **Čtení SMS v autě** | **ANO (21p.28, volba)** | Nastavení → „SMS do auta" → potvrdit Phone21 jako výchozí aplikaci pro SMS. Zprávy z miniserveru se pak zrcadlí do úložiště SMS telefonu, odkud je auto čte (u auta zapnout „Sdílení zpráv"). **Odpověď z auta nejde** — auto by ji poslalo mimo miniserver, tudy cesta nevede. |
+| **Vytáčení z displeje auta / hlasem** | **ANO (21p.28, volba, experiment)** | Privátní síť → „Vytáčení z auta" + v systémovém Telefonu → Účty pro volání povolit „Phone21 (miniserver)" (a případně zvolit jako výchozí pro odchozí hovory). Auto pak vytáčí přes miniserver. Pozor: jako výchozí účet poteče přes miniserver každé vytočení v telefonu. |
+| Phone21 jako **výchozí telefonní appka** (systémový vytáčeč) | **NE (a nevadí to)** | Není potřeba pro nic z výše uvedeného. |
+| **Android Auto** (obrazovka auta) | **NE** | Dva nezávislé důvody: (1) Android Auto potřebuje služby Google Play (na telefonu bez nich neběží) a (2) hlasové volání v Android Auto Google zatím pouští jen do vlastního beta programu, veřejně to zapnout nejde. |
 
-**Prakticky pro tebe:** spáruj telefon s autem klasicky přes Bluetooth —
-hovory přes miniserver budou v autě fungovat jako normální telefonování
-(zvonění, ovládání z volantu, jméno na displeji). SMS v autě takhle nejde;
-zprávy zůstávají v aplikaci Phone21 na telefonu.
+**Prakticky pro tebe:** spáruj telefon s autem přes Bluetooth a v detailu
+spárovaného auta zapni „Sdílení kontaktů" i „Sdílení zpráv". V Phone21 pak
+zapni přepínače — od 21p.29 jsou všechny pohromadě na obrazovce **Konexe**
+(dřív „Privátní síť"), sekce Auto (Bluetooth).
+
+**Ověřeno první jízdou (21p.28):** vytáčení z displeje, příjem z volantu
+i přenos historie hovorů fungují. Poznatky: (1) **jména v autě** ukazuje
+auto z adresáře telefonu — od verze **21p.30** tam kontakty z aplikace
+Phone21 rovnou patří (viz 1E), takže je auto vidí; čísla drž ve tvaru
++420…; (2) **hlasové ovládání z volantu** předává auto hlasovému
+asistentovi telefonu — na telefonu bez asistenta nemá kdo povel obsloužit,
+s aplikací to nesouvisí; (3) prázdnou mezinárodní předvolbu účtu si
+aplikace od 21p.29 doplní sama podle SIM/jazyka telefonu.
