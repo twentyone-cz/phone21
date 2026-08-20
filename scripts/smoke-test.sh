@@ -57,9 +57,12 @@ PYEOF
 step "umbrel compose je validní YAML" umbrel_yaml_check
 umbrel_compose_check() {
   # docker compose musí soubor přijmout i s dosazenými proměnnými —
-  # odhalí rozbité připojení adresářů (např. "too many colons")
+  # odhalí rozbité připojení adresářů (např. "too many colons").
+  # app_proxy dodává Umbrel z vlastní šablony, tady se doplní náhrada.
+  printf 'services:\n  app_proxy:\n    image: alpine:3\n' > /tmp/p21-proxy.yml
   APP_DATA_DIR=/tmp/p21-check APP_PASSWORD=x \
-    docker compose -f umbrel/jednadvacet-phone21/docker-compose.yml config >/dev/null
+    docker compose -f umbrel/jednadvacet-phone21/docker-compose.yml \
+      -f /tmp/p21-proxy.yml config >/dev/null
 }
 step "umbrel compose projde přes docker compose config" umbrel_compose_check
 mount_spec_check() {
