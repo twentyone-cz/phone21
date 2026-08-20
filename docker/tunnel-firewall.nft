@@ -23,7 +23,8 @@ table inet phone21 {
   chain tun_in {
     ct state established,related accept
     ct state invalid drop
-    meta l4proto { icmp, ipv6-icmp } accept
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
     udp dport $SIP_PORT counter accept
     tcp dport $SIP_PORT counter accept
     udp dport $RTP_PORTS counter accept
