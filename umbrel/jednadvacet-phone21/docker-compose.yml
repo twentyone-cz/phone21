@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   pbx:
-    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.28@sha256:cb417e585319f047fa01c8dd1aae53e984ccbf5ca853dd2be6837be97183958f
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.29@sha256:00b808cab8ecff7a4c33594e9bf918cce43f51dc612e122eaa428fca97af53a6
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
@@ -61,7 +61,7 @@ services:
     # chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/phone21-ui:0.9.28@sha256:9ecac82a777db244b579c0b849b60166c04dde88dffe042a738f626001a2daa4
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.29@sha256:ea6c9dd1846be85adccbc0879a989222173e64966f1d398c106d74f169fdfe37
     restart: on-failure
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
@@ -93,7 +93,7 @@ services:
       # stav ovládání (2FA, token) — jediné zapisovatelné místo mimo ts/
       - ${APP_DATA_DIR}/data/smsdata/webui:/var/lib/phone21/webui:rw
       - ${APP_DATA_DIR}/data/astlog:/var/log/asterisk:ro
-      - ${APP_DATA_DIR}/data/dav/config:/var/lib/phone21-dav:rw
+      - ${APP_DATA_DIR}/data/dav/config:/var/lib/phone21-dav:0.9.29@sha256:a69a91e3aeeef1e03fddbfb33effd3ee00563501222c5361ae444785d1533a06
 
   net:
     # Sidecar privátní sítě (login server CockScale, telemetrie vypnutá).
@@ -133,7 +133,7 @@ services:
 
   # Kontakty a kalendář (server pro synchronizaci zařízení).
   dav:
-    image: ghcr.io/twentyone-cz/phone21-dav:0.9.28@sha256:412715659ff532a66b2a5595f00492899d4fee28ebb3e1aec16cb4a94a07a791
+    image: ghcr.io/twentyone-cz/phone21-dav:0.9.29@sha256:a69a91e3aeeef1e03fddbfb33effd3ee00563501222c5361ae444785d1533a06
     restart: on-failure
     ports:
       - "5232:5232"
