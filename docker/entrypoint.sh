@@ -187,6 +187,11 @@ common_setup() {
   chown -R asterisk /var/log/asterisk 2>/dev/null || \
     chmod 0777 /var/log/asterisk 2>/dev/null || true
   chmod 0644 /var/log/asterisk/messages.log 2>/dev/null || true
+  # naplánované pokusy o doručení: adresář zakládá docker jako root, ale
+  # zapisuje do něj ústředna — bez tohohle se retry nikdy nevytvoří
+  mkdir -p /var/spool/asterisk/outgoing/.tmp
+  chown -R asterisk /var/spool/asterisk/outgoing 2>/dev/null || true
+  chmod 0750 /var/spool/asterisk/outgoing /var/spool/asterisk/outgoing/.tmp 2>/dev/null || true
   # historie hovorů: adresář musí existovat, jinak se nezapíše
   mkdir -p /var/log/asterisk/cdr-csv
   touch /var/log/asterisk/cdr-csv/Master.csv 2>/dev/null || true

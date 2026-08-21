@@ -64,11 +64,10 @@ case "${1:-}" in
     when=$(( now + delay ))
     # Tmp soubor NESMÍ vzniknout přímo ve spool adresáři — musí se do něj
     # přesunout hotový (viz NOTBEFORE pojistka v dialplanu). Neměnit.
-    # 777, protože skript běží střídavě pod root (docker exec, testy) a pod
-    # asterisk (System() z dialplanu) — bez toho adresář založený rootem
-    # zablokuje zápisy asteriska a call file tiše nevznikne.
+    # vlastníka adresáře srovnává entrypoint; tady jen pojistka pro případ,
+    # že by chyběl (skript běží pod root i pod uživatelem ústředny)
     mkdir -p "$SPOOL/.tmp" 2>/dev/null || true
-    chmod 777 "$SPOOL/.tmp" 2>/dev/null || true
+    [ "$(id -u)" = "0" ] && chown -R asterisk "$SPOOL" 2>/dev/null || true
     tmp="$SPOOL/.tmp/$qid"
     {
       echo "Channel: Local/smsretry@quectel-incoming"

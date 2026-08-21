@@ -102,6 +102,15 @@ ast_boot_check() {
   return 1
 }
 step "ústředna plně nabootovala" ast_boot_check
+spool_writable_check() {
+  # bez zapisovatelného spoolu se nikdy nevytvoří opakovaný pokus
+  # o doručení a zpráva navždy uvízne ve frontě
+  docker exec "$AST" sh -c '
+    test -d /var/spool/asterisk/outgoing/.tmp &&
+    su -s /bin/sh asterisk -c "touch /var/spool/asterisk/outgoing/.tmp/smoke" &&
+    rm -f /var/spool/asterisk/outgoing/.tmp/smoke'
+}
+step "ústředna smí psát do spoolu (opakované pokusy)" spool_writable_check
 step "CDR adresář existuje (historie hovorů se má kam psát)" \
   docker exec "$AST" test -f /var/log/asterisk/cdr-csv/Master.csv
 ast_dialplan_check() {
