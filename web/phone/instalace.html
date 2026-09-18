@@ -63,12 +63,21 @@ WEBUI_PASSWORD=silne-heslo docker compose -f docker-compose.standalone.yml up -d
 
 <h2>2. Privátní síť</h2>
 <ol class="steps">
-  <li>V <a href="/app">Můj účet</a> se přihlas Lightning peněženkou, zaplať
-  předplatné a dej <b>Přidat zařízení</b> — dostaneš jednorázový klíč
-  (platí 24 h, zobrazí se jen jednou).</li>
-  <li>Klíč vlož v ovládání miniserveru na záložce <b>Síť</b> → Připojit.
-  Za chvíli tam uvidíš adresu miniserveru v privátní síti.</li>
+  <li>V <a href="/app">Můj účet</a> se přihlas Lightning peněženkou a dobij
+  kredit. Miniserver i telefon jsou každý jedno zařízení, takže na rozjezd
+  potřebuješ aspoň dva kredity.</li>
+  <li>Na stránce <b>Moje síť</b> najdeš po dobití sekci <b>Brána (Umbrel)</b>
+  → <b>Vydat token pro bránu</b>. Token se zobrazí jen jednou, tak si ho
+  zkopíruj hned.</li>
+  <li>Token vlož v ovládání miniserveru na záložce <b>Síť</b> a dej
+  <b>Připojit bránu</b>. Miniserver se do sítě přihlásí sám a za chvíli tam
+  uvidíš jeho adresu v privátní síti.</li>
+  <li>Záložní cesta: na téže záložce jde místo tokenu vložit i jednorázový
+  klíč zařízení z <b>Můj účet</b> (platí 24 h, zobrazí se jen jednou).</li>
 </ol>
+<p class="honest">Pořadí je důležité: nejdřív připoj miniserver, teprve pak
+generuj QR kód pro telefon. Nevyužitý kód telefonu drží místo ve tvém limitu
+zařízení až hodinu a oba pak na sebe čekají.</p>
 
 <h2>3. Telefon</h2>
 <ol class="steps">

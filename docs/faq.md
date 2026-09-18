@@ -10,7 +10,9 @@ Co s tím:
 - **Výstupní uzel uvnitř privátní sítě** — provoz telefonu jde ven přes
   vybrané zařízení v síti a jednu aplikaci tím zastanou obě role. Od verze
   0.9.31 to zvládne i sám miniserver: v ovládání na záložce Síť přepni
-  přístup na **i dál do sítě** (trasu ještě musí schválit správa sítě).
+  přístup na **i dál do sítě**. Nic dalšího se nepotvrzuje, jen se přepnutí
+  projeví do zhruba půl minuty. Podmínka je aplikace v telefonu 21p.34
+  a novější — starší verze umí výstupní uzel zapnout, ale ne vypnout.
 - **Druhý uživatelský profil** na telefonu — limit platí na profil, takže
   v jednom může běžet komerční VPN a v druhém miniserver.
 

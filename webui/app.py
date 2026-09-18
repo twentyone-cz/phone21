@@ -7,8 +7,10 @@ Určeno výhradně pro LAN/privátní síť — nikdy nevystavovat veřejně.
 """
 
 import base64
+import datetime
 import hashlib
 import html
+import http.client
 import json
 import os
 import re
@@ -202,7 +204,7 @@ _PROV_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # bez záměnitelných znak
 
 
 def prov_new_token():
-    """Jednorázový token pro stažení konfigurace softphonem. Krátký schválně
+    """Jednorázový token pro stažení konfigurace softphonem. Krátký záměrně
     — když skener QR nefunguje, musí jít URL opsat z obrazovky."""
     import secrets as _s
     token = "".join(_s.choice(_PROV_ALPHABET) for _ in range(8))
@@ -233,6 +235,35 @@ def prov_claim(token):
 
 
 PARTNER_URL = os.environ.get("COCKSCALE_URL", "https://cockscale.twentyone.cz")
+
+# klíč od koordinátora (base64-like token), stejný tvar pro telefon i bránu
+PARTNER_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{20,200}$")
+# značka tagované brány z odpovědi gateway-key
+PARTNER_TAG_RE = re.compile(r"^tag:[A-Za-z0-9_:-]{1,64}$")
+
+
+def _url_parts(url):
+    parts = urllib.parse.urlsplit(str(url).strip())
+    return parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/")
+
+
+def partner_login_ok(url):
+    """Adresa pro přihlášení z odpovědi musí ukazovat na TÉHOŽ koordinátora,
+    jakého má ovládání nastaveného — jinak by klíč odešel jinam, než kde vznikl.
+    Zabezpečené spojení projde vždy, nezabezpečené jen u adresy shodné
+    s nastavenou (kvůli laboratoři)."""
+    try:
+        scheme, netloc, path = _url_parts(url)
+        want_scheme, want_netloc, want_path = _url_parts(PARTNER_URL)
+    except (ValueError, AttributeError):
+        return False
+    if not netloc or netloc != want_netloc:
+        return False
+    if scheme == "https":
+        return True
+    if scheme == "http":
+        return (scheme, path) == (want_scheme, want_path)
+    return False
 
 
 def partner_token_path():
@@ -291,13 +322,30 @@ def firewall_state():
 def write_state(path, data):
     """Atomický zápis stavu (0600, tmp+rename). Volající chytá OSError —
     na instalaci bez rw mountu STATE_DIR zápis selže a uživatel musí dostat
-    čitelnou chybu, ne přerušené spojení."""
+    čitelnou chybu, ne přerušené spojení.
+
+    Dočasný soubor má jméno podle vlákna a zakládá se výhradně (O_EXCL):
+    do sdíleného adresáře sítě píše i vlákno na pozadí, takže dva souběžné
+    zápisy téhož souboru si nesmějí přepsat rozepsaný obsah. Práva 0600 platí
+    od okamžiku vzniku a čtenář vidí jen hotový soubor — po přejmenování."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    tmp = "%s.tmp%d" % (path, threading.get_ident())
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # zbytek po pádu uprostřed zápisu; jméno patří tomuhle vláknu
+        os.remove(tmp)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def audit(msg):
@@ -320,43 +368,936 @@ def save_partner_token(token):
 
 
 PARTNER_ERRORS = {
-    "bad_token": "Token brány neplatí — vydej si nový v účtu sítě.",
+    "bad_token": "Token účtu sítě neplatí — vydej si v Mojí síti nový.",
+    "account_deleting": "Účet sítě se ruší — počkej, než se to dokončí.",
     "no_credits": "Síť je pozastavená — v účtu chybí kredit.",
     "device_limit": "Vyčerpaný limit zařízení na účtu sítě.",
+    "gateway_exists": "V účtu sítě je pořád vedená jiná brána — odregistruj ji "
+                      "v Mojí síti a zkus to znovu.",
     "coordinator": "Koordinátor sítě teď neodpovídá, zkus to za chvíli.",
 }
+
+# --- Klient obou partnerských endpointů --------------------------------------
+# Kontrakt: POST, hlavičky jen Authorization: Bearer a Content-Length: 0, žádné
+# tělo a žádná query (chunked by frontend odmítl 501), bez následování
+# přesměrování — jinak by token odešel na cizí adresu. Úspěch se pozná podle
+# stavového kódu, ne podle těla: úspěšná odpověď pole "error" NEMÁ.
+PARTNER_MAX_BODY = 64 * 1024
+# klíč brány: koordinátor na odpověď potřebuje desítky sekund (řetěz volání
+# vlastní řídicí části a zámky), edge odpověď utne až na 60 s jako HTML 504
+PARTNER_TIMEOUT_GATEWAY = float(os.environ.get("PARTNER_TIMEOUT_GATEWAY", "45"))
+# klíč telefonu se bere během stahování QR — telefon čeká jen krátce
+PARTNER_TIMEOUT_PHONE = float(os.environ.get("PARTNER_TIMEOUT_PHONE", "4"))
+# 429: frontend posílá prakticky vždy 1 s (token bucket), edge 5 s — proto
+# dolní mez i strop
+PARTNER_RETRY_MIN = 5
+PARTNER_RETRY_MAX = 300
+PARTNER_RETRY_DEFAULT = 60
+
+
+class _PartnerNoRedirect(urllib.request.HTTPRedirectHandler):
+    """Přesměrování se nenásleduje — skončí jako HTTPError."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_partner_opener = urllib.request.build_opener(_PartnerNoRedirect)
+
+
+def _partner_json(headers, body):
+    """JSON jen při Content-Type: application/json a jen dict. HTML od edge,
+    text/plain od frontendu i JSON pole se berou jako odpověď bez JSON."""
+    try:
+        ctype = headers.get_content_type()
+    except AttributeError:
+        ctype = (headers.get("Content-Type", "") or "").split(";")[0].strip().lower()
+    if ctype != "application/json":
+        return None
+    try:
+        data = json.loads(body.decode("utf-8", "replace"))
+    except (ValueError, AttributeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _partner_retry_after(headers):
+    """Sekundy z Retry-After. Nečíselná nebo chybějící hodnota = 60 s, výsledek
+    se ořízne na <5 s, 300 s>."""
+    try:
+        raw = (headers.get("Retry-After", "") or "").strip()
+    except AttributeError:
+        raw = ""
+    try:
+        value = float(raw)
+    except ValueError:
+        value = PARTNER_RETRY_DEFAULT
+    if not value == value or value <= 0:        # NaN nebo nesmysl
+        value = PARTNER_RETRY_DEFAULT
+    return max(PARTNER_RETRY_MIN, min(PARTNER_RETRY_MAX, value))
+
+
+def _partner_worker(path, timeout, token, out):
+    """Samotné volání. Běží ve vlákně, výsledek plní do out."""
+    req = urllib.request.Request(
+        PARTNER_URL.rstrip("/") + path, method="POST",
+        headers={"Authorization": "Bearer " + token, "Content-Length": "0"})
+    try:
+        with _partner_opener.open(req, timeout=timeout) as resp:
+            body = resp.read(PARTNER_MAX_BODY)
+            out.update(kind="http", status=resp.status,
+                       data=_partner_json(resp.headers, body))
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read(PARTNER_MAX_BODY)
+        except (OSError, http.client.HTTPException, ValueError, AttributeError):
+            body = b""
+        out.update(kind="http", status=e.code,
+                   data=_partner_json(e.headers, body),
+                   retry_after=_partner_retry_after(e.headers))
+    except (urllib.error.URLError, OSError, http.client.HTTPException,
+            ValueError, AttributeError) as e:
+        out.update(kind="network", status=0, note=str(e))
+    except Exception as e:      # ProvHandler ani smyčka brány nesmí spadnout
+        out.update(kind="network", status=0, note=repr(e))
+
+
+def partner_limit_text(allowed, limited_by):
+    """403 device_limit s čísly. Brána i telefon stojí každý jedno místo,
+    použitelný účet má tedy aspoň dvě."""
+    if isinstance(allowed, int):
+        text = ("Účet sítě má místo pro %d zařízení a je obsazené." % allowed)
+        if allowed < 2:
+            text += (" Brána i telefon zaberou každý jedno místo, chybí tedy "
+                     "aspoň %d." % (2 - allowed))
+    else:
+        text = "Účet sítě nemá volné místo pro další zařízení."
+    if limited_by == "credits":
+        return text + " Dobij kredit v Mojí síti a dej Připojit bránu znovu."
+    if limited_by == "devices":
+        return text + (" Je to limit zařízení účtu — uvolni místo "
+                       "odregistrováním zařízení v Mojí síti.")
+    return text
+
+
+def partner_message(res):
+    """Hláška pro uživatele z jednoho výsledku partner_post()."""
+    status, err = res.get("status", 0), res.get("error", "")
+    if err == "device_limit":
+        return partner_limit_text(res.get("allowed"), res.get("limited_by", ""))
+    if err in PARTNER_ERRORS:
+        return PARTNER_ERRORS[err]
+    if status == 429:
+        return ("Koordinátor sítě odmítá tak časté dotazy — zkusím to za %d s."
+                % int(res.get("retry_after") or PARTNER_RETRY_DEFAULT))
+    if status >= 500 or res.get("kind") == "nojson":
+        return ("Koordinátor sítě teď neodpovídá (%d), zkouším to dál."
+                % status)
+    return "Koordinátor sítě požadavek odmítl (%d)." % status
+
+
+def partner_post(path, timeout, token=None):
+    """Jedno volání koordinátora; nikdy nevyhodí výjimku.
+
+    Vrací slovník: kind (http|network|timeout|nojson|no_token), status, data,
+    error, allowed, limited_by, retry_after, ok, message. Volá se ve vlákně,
+    protože timeout v urllib platí na JEDNU socketovou operaci (a DNS nemá
+    timeout žádný) — hodiny musí platit na celé volání."""
+    res = {"path": path, "kind": "", "status": 0, "data": None, "error": "",
+           "allowed": None, "limited_by": "", "retry_after": None,
+           "ok": False, "message": "", "note": ""}
+    tok = read_partner_token() if token is None else token
+    if not tok:
+        res.update(kind="no_token",
+                   message="V ovládání není uložený token účtu sítě.")
+        return res
+    slot = {}
+    th = threading.Thread(target=_partner_worker,
+                          args=(path, timeout, tok, slot), daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive() or not slot:
+        # Pozdní odpověď se zahodí — opakování je bezpečné, další volání
+        # předchozí nevyužitý klíč téhož druhu zneplatní.
+        res.update(kind="timeout",
+                   message="Koordinátor sítě neodpověděl včas.")
+        return res
+    res.update(slot)
+    status = res["status"]
+    data = res["data"] if isinstance(res["data"], dict) else {}
+    if res["kind"] == "network":
+        res["message"] = "Koordinátor sítě je nedostupný: %s" % res["note"]
+        return res
+    if 200 <= status < 300:
+        # úspěch podle stavového kódu; tělo musí být JSON objekt, jinak
+        # odpověď nepochází od frontendu
+        if res["data"] is None:
+            res.update(kind="nojson",
+                       message="Koordinátor sítě odpověděl nesrozumitelně.")
+        else:
+            res["ok"] = True
+        return res
+    err = data.get("error", "")
+    res["error"] = err if isinstance(err, str) else ""
+    allowed = data.get("allowed")
+    res["allowed"] = allowed if isinstance(allowed, int) and not isinstance(
+        allowed, bool) else None
+    limited = data.get("limited_by", "")
+    res["limited_by"] = limited if isinstance(limited, str) else ""
+    if res["data"] is None:
+        res["kind"] = "nojson"      # HTML od edge nebo text/plain
+    res["message"] = partner_message(res)
+    return res
 
 
 def request_network_key():
     """Vyžádá jednorázový klíč do privátní sítě pro telefon.
     Vrací (klíč, adresa_koordinátora, chyba_pro_uživatele)."""
-    token = read_partner_token()
-    if not token:
+    if not read_partner_token():
         return "", "", ""      # bez tokenu se prostě QR omezí na účet
-    req = urllib.request.Request(
-        PARTNER_URL.rstrip("/") + "/partner/preauthkeys", method="POST",
-        headers={"Authorization": "Bearer " + token, "Content-Length": "0"})
+    res = partner_post("/partner/preauthkeys", PARTNER_TIMEOUT_PHONE)
+    if not res["ok"]:
+        return "", "", res["message"]
+    data = res["data"]
+    key = data.get("key", "")
+    login = data.get("login_server", PARTNER_URL)
+    if not isinstance(key, str) or not PARTNER_KEY_RE.match(key):
+        return "", "", "Koordinátor sítě poslal klíč v neznámém tvaru."
+    if not isinstance(login, str) or not partner_login_ok(login):
+        return "", "", "Koordinátor sítě poslal neznámou adresu pro přihlášení."
+    return key, login, ""
+
+
+# --- Klíč brány: ovládání → sdílený adresář sítě → sidecar -------------------
+# Ovládání jako jediné zná token účtu, takže klíč brány vyžádá ono a předá ho
+# sidecaru souborem. Pravidla (kontrakt ts/): každý soubor má jediného
+# zapisovatele a každý zápis je atomický; metadata se píšou VŽDY těsně před
+# klíčem, aby v okamžiku, kdy klíč vznikne, už seděla.
+TS_STATE_MAX_AGE = 45           # starší stav od sidecaru je neznámý
+# Výjimka pro přihlašování: sidecar je jedno vlákno a uvnitř `up` (--timeout=90s)
+# stav nepíše. Zápis udělá těsně PŘED voláním, takže hlášení s key=inuse smí být
+# starší — jinak by ovládání půlku přihlašování tvrdilo, že se síť neozývá.
+# 90 s timeout + tik smyčky + rezerva.
+TS_STATE_MAX_AGE_CONNECTING = 120
+GATEWAY_TICK = 10               # perioda vlákna na pozadí [s]
+GATEWAY_KEY_TTL = 3600          # klíč brány platí hodinu (záloha, když
+                                # koordinátor platnost nepošle)
+GATEWAY_PENDING_MAX_AGE = 180   # osiřelá značka po pádu ovládání
+GATEWAY_BACKOFF_MIN = 30
+GATEWAY_BACKOFF_MAX = 600
+GATEWAY_HOURLY_MAX = 6          # víc žádostí za hodinu už jen na stisk
+GATEWAY_BACKOFF = {             # kód chyby → jak dlouho nezkoušet znovu [s]
+    "account_deleting": 600,
+    "no_credits": 300,
+    "device_limit": 600,
+    "gateway_exists": 3600,
+}
+
+
+def ts_path(name):
+    """Prázdná cesta na instalaci bez privátní sítě — otevření pak selže
+    předvídatelně místo sáhnutí do pracovního adresáře."""
+    return os.path.join(TS_DIR, name) if TS_DIR else ""
+
+
+def _kv_read(path, limit=4096):
+    """Soubor řádků key=value na slovník. Chybějící soubor = prázdný slovník."""
+    out = {}
     try:
-        # telefon na konfiguraci čeká jen krátce — radši QR bez sítě
-        # (a viditelná chyba) než aby to telefon vzdal dřív než my
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = json.loads(resp.read())
-        return data.get("key", ""), data.get("login_server", PARTNER_URL), ""
-    except urllib.error.HTTPError as e:
+        with open(path) as f:
+            raw = f.read(limit)
+    except OSError:
+        return out
+    for line in raw.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            out[key.strip()] = value.strip()
+    return out
+
+
+def _one_line(value):
+    """Soubory kontraktu jsou řádky key=value v ASCII — víc se tam nedostane."""
+    return "".join(ch for ch in str(value)
+                   if ch.isprintable() and ch.isascii())[:512]
+
+
+def ts_state():
+    """Stav od sidecaru. Klíč _age je stáří zápisu v sekundách (None, když
+    soubor chybí nebo nemá použitelné `updated`)."""
+    out = _kv_read(ts_path("state"))
+    out["_age"] = None
+    try:
+        out["_age"] = max(0.0, time.time() - float(out.get("updated", "")))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def ts_state_max_age(state):
+    """Mez stáří, po které se hlášení sidecaru bere jako neznámé. Během
+    přihlašování (key=inuse) je delší — sidecar v té době čeká uvnitř `up`
+    a stav zapsal těsně před ním."""
+    if state.get("key") == "inuse":
+        return TS_STATE_MAX_AGE_CONNECTING
+    return TS_STATE_MAX_AGE
+
+
+def ts_state_fresh(state):
+    """True, když je hlášení sidecaru dost čerstvé na to, aby se z něj dalo
+    vycházet."""
+    age = state.get("_age")
+    return age is not None and age <= ts_state_max_age(state)
+
+
+def ts_backend():
+    """Stav sítě podle sidecaru; zastaralý nebo chybějící zápis = neznámo
+    (prázdný řetězec), NIKDY se z něj nedovozuje odhlášení."""
+    state = ts_state()
+    if not ts_state_fresh(state):
+        return ""
+    return state.get("backend", "")
+
+
+def gateway_last_path():
+    return os.path.join(STATE_DIR, "gateway_last")
+
+
+def gateway_last_read():
+    """Poslední pokus o klíč brány pro zobrazení v ovládání."""
+    return _kv_read(gateway_last_path())
+
+
+def gateway_last_write(res, next_try):
+    """Záznam o posledním pokusu. NIKDY neobsahuje klíč ani token."""
+    kind, status = res.get("kind", ""), res.get("status", 0)
+    fields = (
+        ("at", int(time.time())),
+        ("status", status if kind == "http" and status else kind),
+        ("error", res.get("error", "")),
+        ("allowed", res.get("allowed")),
+        ("limited_by", res.get("limited_by", "")),
+        ("retry_after", res.get("retry_after")),
+        ("next_try", int(next_try) if next_try else ""),
+    )
+    body = "".join("%s=%s\n" % (k, "" if v is None else _one_line(v))
+                   for k, v in fields)
+    try:
+        write_state(gateway_last_path(), body)
+    except OSError as e:
+        print("[gateway] pokus nejde zapsat do stavu: %s" % e, flush=True)
+
+
+def _epoch_from(value, default=0):
+    """Platnost z odpovědi: číslo (unix), řetězec RFC 3339, nebo nic."""
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, str):
+        return default
+    raw = value.strip()
+    if raw[-1:] in ("Z", "z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        return default
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return int(parsed.timestamp())
+
+
+# Klíč píše ovládání ze dvou míst: vlákno na pozadí (klíč z koordinátora)
+# a ruční formulář na záložce Síť. Dvojice key_meta → authkey se přitom nesmí
+# proložit dvojicí z té druhé cesty — sidecar by k jednomu klíči četl cizí
+# metadata (jinou platnost, jiný login_server, jiný původ). Zápisy samy
+# atomické jsou, atomická musí být i celá dvojice, proto tenhle zámek.
+_key_lock = threading.Lock()
+
+
+def hand_key_over(key, origin, login, expires, tag=""):
+    """Předá klíč sidecaru podle kontraktu sdíleného adresáře sítě.
+
+    Metadata se píšou VŽDY těsně před klíčem, aby v okamžiku, kdy klíč vznikne,
+    už seděla — sidecar si klíč bere přejmenováním a z metadat bere adresu pro
+    přihlášení i platnost. Oba zápisy jsou atomické (tmp + přejmenování),
+    takže sidecar nikdy nedostane rozepsaný soubor. Značku want_key maže
+    ovládání hned po zápisu klíče; sidecar si ji smaže sám, až se připojí.
+    Celá dvojice běží pod _key_lock, aby se obě cesty ke klíči (vlákno
+    a ruční formulář) nemohly proložit. Vyhazuje OSError, když sdílený adresář
+    nejde zapsat."""
+    meta = ("origin=%s\n"
+            "login_server=%s\n"
+            "expires_epoch=%d\n"
+            "issued_epoch=%d\n"
+            "tag=%s\n" % (_one_line(origin), _one_line(login), int(expires),
+                          int(time.time()), _one_line(tag)))
+    with _key_lock:
+        write_state(ts_path("key_meta"), meta)
+        write_state(ts_path("authkey"), key + "\n")
         try:
-            reason = json.loads(e.read()).get("error", "")
-        except Exception:
-            reason = ""
-        if e.code == 429:
-            return "", "", "Moc pokusů po sobě — zkus QR za minutu."
-        return "", "", PARTNER_ERRORS.get(
-            reason, "Klíč do sítě se nepodařilo získat (%d)." % e.code)
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        return "", "", "Koordinátor sítě je nedostupný: %s" % e
+            os.remove(ts_path("want_key"))
+        except OSError:
+            pass
 
 
-def prov_xml(domain, ts_url="", ts_key=""):
-    """Konfigurace účtu pro aplikaci v telefonu."""
+def request_gateway_key(trigger="automaticky"):
+    """Vyžádá klíč brány a předá ho sidecaru. Vrací výsledek partner_post()
+    doplněný o vlastní kind (no_ts, running, badkey, badlogin, write).
+
+    Nikdy se nevolá, když sidecar hlásí připojenou bránu: koordinátor by
+    odpověděl 409 (a u vyčerpaného kreditu dokonce 403, protože stav účtu
+    vyhodnocuje dřív než duplicitu). Do žurnálu jde jen značka a platnost —
+    klíč nikdy."""
+    blank = {"path": "/partner/gateway-key", "status": 0, "data": None,
+             "error": "", "allowed": None, "limited_by": "",
+             "retry_after": None, "ok": False, "note": ""}
+    if not TS_DIR:
+        return dict(blank, kind="no_ts",
+                    message="Tahle instalace privátní síť neovládá.")
+    if ts_backend() == "Running":
+        return dict(blank, kind="running",
+                    message="Brána už v síti je — nový klíč není potřeba.")
+    res = partner_post("/partner/gateway-key", PARTNER_TIMEOUT_GATEWAY)
+    if not res["ok"]:
+        print("[gateway] klíč nezískán (%s): kind=%s status=%s error=%s"
+              % (trigger, res.get("kind"), res.get("status"),
+                 res.get("error") or "-"), flush=True)
+        return res
+    data = res["data"]
+    key = data.get("key", "")
+    login = data.get("login_server") or PARTNER_URL
+    if not isinstance(key, str) or not PARTNER_KEY_RE.match(key):
+        res.update(ok=False, kind="badkey",
+                   message="Koordinátor sítě poslal klíč v neznámém tvaru.")
+        return res
+    if not isinstance(login, str) or not partner_login_ok(login):
+        res.update(ok=False, kind="badlogin",
+                   message="Koordinátor sítě poslal neznámou adresu pro "
+                           "přihlášení.")
+        return res
+    tag = data.get("tag", "")
+    tag = tag.strip() if isinstance(tag, str) else ""
+    if not PARTNER_TAG_RE.match(tag):
+        tag = ""
+    issued = int(time.time())
+    expires = _epoch_from(data.get("expires"), issued + GATEWAY_KEY_TTL)
+    if expires <= issued:
+        # posunuté hodiny nebo neznámý tvar — jinak by sidecar klíč rovnou
+        # zahodil jako prošlý a točil se dokola
+        expires = issued + GATEWAY_KEY_TTL
+    try:
+        hand_key_over(key, "gateway", login, expires, tag)
+    except OSError as e:
+        res.update(ok=False, kind="write",
+                   message="Klíč nejde předat do privátní sítě: %s" % e)
+        print("[gateway] zápis klíče selhal: %s" % e, flush=True)
+        return res
+    print("[gateway] klíč přijat (%s): značka=%s platí do %s"
+          % (trigger, tag or "-",
+             time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(expires))),
+          flush=True)
+    return res
+
+
+# Jedno vlákno na pozadí: bez něj by se brána po odregistrování sama nevrátila
+# (ovládání je jinak čistě obsluha požadavků). Souběh hlídá zámek uvnitř
+# procesu a značka key_pending mezi procesy.
+_gw_lock = threading.Lock()
+_gw = {
+    "next_try": 0.0,    # dřív se znovu nevolá
+    "backoff": 0.0,     # poslední prodleva u dočasných chyb (zdvojuje se)
+    "auto_off": "",     # čeká se jen na stisk (credits, rate)
+    "stop": "",         # neplatný token — ani na stisk
+    "error": "",        # poslední kód chyby
+    "queued": False,    # stisk tlačítka
+    "calls": [],        # časy volání kvůli stropu za hodinu
+    "running": False,
+}
+
+
+def gateway_backoff_clear():
+    """Nový token maže i zákaz po neplatném tokenu — jinak by vlákno mlčelo
+    dál, i když je problém odstraněný."""
+    with _gw_lock:
+        _gw.update(next_try=0.0, backoff=0.0, auto_off="", stop="", error="")
+
+
+def gateway_request():
+    """Zařadí žádost o klíč brány (stisk tlačítka). Vrací hlášku pro uživatele,
+    prázdný řetězec = zařazeno. Samotné volání trvá desítky sekund, takže ho
+    dělá vlákno na pozadí a stránka odpoví hned."""
+    with _gw_lock:
+        if _gw["stop"]:
+            return PARTNER_ERRORS.get(_gw["stop"], "Klíč teď nejde vyžádat.")
+        if not read_partner_token():
+            return "V ovládání není uložený token účtu sítě."
+        if ts_backend() == "Running":
+            return "Brána už v síti je — nový klíč není potřeba."
+        _gw["queued"] = True
+        # 409 i vyčerpaný strop si uživatel odstraní sám a nesmí pak čekat
+        # hodinu; rušení účtu ani neplatný token se stiskem obejít nedají
+        if _gw["error"] != "account_deleting":
+            _gw.update(next_try=0.0, backoff=0.0, auto_off="")
+    return ""
+
+
+def gateway_should_call():
+    """Rozhodnutí pro jeden tik: (volat?, byl to stisk?)."""
+    now = time.time()
+    with _gw_lock:
+        if _gw["running"] or _gw["stop"] or now < _gw["next_try"]:
+            return False, False
+        if ts_backend() == "Running":
+            # připojená brána klíč nepotřebuje a koordinátor by vrátil 409
+            # (u vyčerpaného kreditu 403) — do stropu se to počítat nesmí
+            return False, False
+        # Strop je klouzavé okno: stará volání z něj vypadnou a s nimi musí
+        # zmizet i zákaz automatiky, jinak by se vlákno po šesti marných
+        # pokusech (~25 min) vypnulo natrvalo a brána by se po odregistrování
+        # sama nevrátila. Pořadí je proto dané: nejdřív pročistit, pak
+        # přehodnotit auto_off a teprve pak se na něj ptát.
+        _gw["calls"] = [t for t in _gw["calls"] if now - t < 3600]
+        if (_gw["auto_off"] == "rate"
+                and len(_gw["calls"]) < GATEWAY_HOURLY_MAX):
+            _gw["auto_off"] = ""
+            print("[gateway] hodinové okno uplynulo — automatické pokusy "
+                  "zase běží", flush=True)
+        manual = _gw["queued"]
+        if not manual:
+            if _gw["auto_off"] or not read_partner_token():
+                return False, False
+            if len(_gw["calls"]) >= GATEWAY_HOURLY_MAX:
+                if _gw["auto_off"] != "rate":
+                    _gw["auto_off"] = "rate"
+                    print("[gateway] strop %d žádostí za hodinu — dál jen na "
+                          "stisk" % GATEWAY_HOURLY_MAX, flush=True)
+                return False, False
+            if not os.path.exists(ts_path("want_key")):
+                return False, False
+        _gw.update(queued=False, running=True)
+        return True, manual
+
+
+def gateway_pending_take():
+    """Značka key_pending přes O_CREAT|O_EXCL — druhé volání se nespustí ani
+    po restartu ovládání. Osiřelou značku po pádu zahodí stáří."""
+    path = ts_path("key_pending")
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            try:
+                age = time.time() - os.stat(path).st_mtime
+            except OSError:
+                continue
+            if age < GATEWAY_PENDING_MAX_AGE:
+                return False
+            try:
+                os.remove(path)
+            except OSError:
+                return False
+            continue
+        except OSError:
+            return True     # bez zápisu do sdíleného adresáře se neblokuje
+        with os.fdopen(fd, "w") as f:
+            f.write("%d\n" % int(time.time()))
+        return True
+    return False
+
+
+def gateway_pending_release():
+    try:
+        os.remove(ts_path("key_pending"))
+    except OSError:
+        pass
+
+
+def gateway_finish(res):
+    """Z výsledku spočítá, kdy se smí zkusit znovu, a uloží záznam pro UI."""
+    now = time.time()
+    kind, err = res.get("kind", ""), res.get("error", "")
+    with _gw_lock:
+        _gw.update(running=False, error=err or kind)
+        stop, auto_off, delay = "", "", 0.0
+        if res.get("ok"):
+            _gw["backoff"] = 0.0
+            # klíč se podařilo získat, takže důvod, proč se čekalo jen na
+            # stisk (chybějící kredit, vyčerpaný strop), pominul — jinak by
+            # ovládání příští want_key od sidecaru navždy ignorovalo
+            _gw["auto_off"] = ""
+            _gw["error"] = ""
+            delay = GATEWAY_TICK        # další kolo si vyžádá sidecar
+        elif err == "bad_token":
+            _gw["backoff"] = 0.0
+            stop = "bad_token"
+        elif err == "device_limit":
+            _gw["backoff"] = 0.0
+            delay = GATEWAY_BACKOFF["device_limit"]
+            if res.get("limited_by") == "credits":
+                # chybí kredit, ne místo — samo se to nespraví, čeká se na stisk
+                auto_off = "credits"
+        elif err in GATEWAY_BACKOFF:
+            _gw["backoff"] = 0.0
+            delay = GATEWAY_BACKOFF[err]
+        elif res.get("status") == 429:
+            _gw["backoff"] = 0.0
+            delay = float(res.get("retry_after") or PARTNER_RETRY_DEFAULT)
+        elif kind in ("running", "no_ts"):
+            _gw["backoff"] = 0.0
+            delay = GATEWAY_TICK
+        else:
+            # dočasné chyby: 5xx, odpověď bez JSON, timeout, síť, zápis
+            prev = _gw["backoff"]
+            delay = (GATEWAY_BACKOFF_MIN if prev <= 0
+                     else min(prev * 2, GATEWAY_BACKOFF_MAX))
+            _gw["backoff"] = delay
+        if stop:
+            _gw["stop"] = stop
+        if auto_off:
+            _gw["auto_off"] = auto_off
+        _gw["next_try"] = now + delay if delay else 0.0
+        next_try = _gw["next_try"]
+    gateway_last_write(res, next_try)
+    print("[gateway] výsledek: kind=%s status=%s error=%s další pokus za %d s%s"
+          % (kind or "-", res.get("status"), err or "-", int(delay),
+             " (dál jen na stisk)" if (stop or auto_off) else ""), flush=True)
+
+
+def gateway_tick():
+    """Jeden průchod vlákna na pozadí."""
+    go, manual = gateway_should_call()
+    if not go:
+        return
+    if not gateway_pending_take():
+        with _gw_lock:      # jiný pokus právě běží, stisk se nesmí ztratit
+            _gw["running"] = False
+            _gw["queued"] = _gw["queued"] or manual
+        return
+    with _gw_lock:          # do stropu se počítají jen skutečná volání
+        _gw["calls"].append(time.time())
+    try:
+        res = request_gateway_key("stisk" if manual else "automaticky")
+    finally:
+        gateway_pending_release()
+    gateway_finish(res)
+
+
+def gateway_state_restore():
+    """Po restartu ovládání navázat na poslední pokus ze záznamu na disku.
+
+    Prodlevy i zákaz po neplatném tokenu jinak žijí jen v paměti procesu,
+    takže restart (aktualizace aplikace, restart miniserveru, pád kontejneru)
+    je smázne a ovládání se hned ptá znovu — a opakovaným restartem by se dal
+    obejít i strop žádostí. Zákaz „jen na stisk“ (auto_off) se záměrně
+    neobnovuje: ten se ruší až úspěchem nebo stiskem, a po restartu je lepší
+    zkusit to jednou znovu než mlčet."""
+    last = gateway_last_read()
+    if not last.get("at"):
+        return
+    try:
+        nxt = float(last.get("next_try", "") or 0)
+    except (TypeError, ValueError):
+        nxt = 0.0
+    err = last.get("error", "")
+    with _gw_lock:
+        if nxt > time.time():
+            _gw["next_try"] = nxt
+        _gw["error"] = err
+        if err == "bad_token":
+            # token se dá vyměnit jen v běžícím ovládání a uložení nového ho
+            # zase pustí (gateway_backoff_clear v /net/partner)
+            _gw["stop"] = "bad_token"
+    print("[gateway] navázáno na poslední pokus: chyba=%s další pokus za %d s"
+          % (err or "-", max(0, int(nxt - time.time()))), flush=True)
+
+
+def gateway_loop():
+    """Hlídá want_key od sidecaru a frontu z tlačítka. Smyčka nesmí umřít —
+    chyba v ní by se projevila jako tiše nefunkční připojování brány."""
+    try:
+        gateway_state_restore()
+    except Exception as e:
+        print("[gateway] poslední pokus nejde přečíst: %r" % e, flush=True)
+    while True:
+        try:
+            gateway_tick()
+        except Exception as e:
+            print("[gateway] chyba smyčky: %r" % e, flush=True)
+            with _gw_lock:
+                _gw["running"] = False
+        time.sleep(GATEWAY_TICK)
+
+
+# --- Stav brány v privátní síti ----------------------------------------------
+# Tři zdroje: adresa od sidecaru (ts/ip), jeho hlášení (ts/state) a záznam
+# o posledním pokusu o klíč (gateway_last). Samotná adresa nestačí: v souboru
+# zůstává ještě několik průchodů po odhlášení (ústředna si podle ní staví
+# doménu), takže by ovládání hlásilo připojenou bránu i pro mrtvou síť.
+MANUAL_KEY_TTL = 24 * 3600      # ruční klíč z Mojí sítě platí 24 h
+
+NET_LABEL = {
+    "connected": ("Připojeno", "ok"),
+    "connecting": ("Připojuji…", "warn"),
+    "pending_manual": ("Připojuji…", "warn"),
+    "paused": ("Pozastaveno", "warn"),
+    "needs_login": ("Nepřipojeno", "warn"),
+    "error": ("Nepřipojeno", "bad"),
+    "idle": ("Nepřipojeno", "warn"),
+}
+# stavy, ve kterých se čeká na výsledek a stránka se sama obnovuje
+NET_WAITING = ("connecting", "pending_manual")
+# Obnovování má strop ~2 min (12 kol po 10 s) a pamatuje si začátek v okně
+# prohlížeče — jinak by stránka na zapomenutém tabu tloukla do ovládání
+# donekonečna. Starší značka než 10 min patří dřívějšímu připojování.
+NET_REFRESH = """<script>
+(function () {
+  var k = "p21net", now = Date.now(), start = 0;
+  try { start = +(sessionStorage.getItem(k) || 0); } catch (e) { return; }
+  if (!start || now - start > 600000) {
+    start = now;
+    try { sessionStorage.setItem(k, String(start)); } catch (e) { return; }
+  }
+  if (now - start < 120000) {
+    setTimeout(function () { location.reload(); }, 10000);
+  } else {
+    try { sessionStorage.removeItem(k); } catch (e) {}
+  }
+})();
+</script>"""
+
+
+def net_dashboard_url():
+    """Zákaznický web s účtem sítě. Technická adresa koordinátora
+    (COCKSCALE_URL) sem nepatří — zákazník ji nemá vidět."""
+    return os.environ.get("NET_DASHBOARD_URL",
+                          "https://phone.twentyone.cz/dashboard")
+
+
+def net_pay_url():
+    """Dobití kreditu leží na témže webu vedle přehledu sítě."""
+    dash = net_dashboard_url()
+    return (dash[:-len("/dashboard")] + "/pay"
+            if dash.endswith("/dashboard") else dash)
+
+
+def _ts_peers(state):
+    """Počet protějšků v síti. Nečitelná hodnota i -1 znamenají „neznámo“
+    (None) — pozastavená síť se pozná JEN z nuly, jinak by chyba při čtení
+    stavu vypadala jako odříznutý účet."""
+    try:
+        peers = int(state.get("peers", ""))
+    except (TypeError, ValueError):
+        return None
+    return None if peers < 0 else peers
+
+
+def gateway_last_failed(last):
+    """Skončil poslední pokus o klíč chybou? Stavy, kdy se nevolalo
+    (připojená brána, instalace bez sítě), chyba nejsou."""
+    status = last.get("status", "")
+    if not last.get("at") or not status:
+        return False
+    return not (status.startswith("2") or status in ("running", "no_ts"))
+
+
+def gateway_last_text():
+    """Řádek „Poslední pokus …“ pod tlačítkem. Čte se ze záznamu na disku,
+    ne z paměti procesu, takže přežije restart ovládání. Klíč ani token
+    v záznamu nikdy nejsou."""
+    last = gateway_last_read()
+    try:
+        at = int(last.get("at", ""))
+    except (TypeError, ValueError):
+        return ""
+    if not at:
+        return ""
+    when = time.strftime("%d.%m. %H:%M", time.localtime(at))
+    status, err = last.get("status", ""), last.get("error", "")
+    if not gateway_last_failed(last):
+        if status.startswith("2"):
+            return "Poslední pokus %s: klíč vydán." % when
+        return ""
+    try:
+        allowed = int(last.get("allowed", ""))
+    except (TypeError, ValueError):
+        allowed = None
+    if err == "device_limit":
+        why = partner_limit_text(allowed, last.get("limited_by", ""))
+    elif err in PARTNER_ERRORS:
+        why = PARTNER_ERRORS[err]
+    elif status == "timeout":
+        why = "Koordinátor sítě neodpověděl včas."
+    elif status == "network":
+        why = "Koordinátor sítě je nedostupný."
+    elif status == "nojson":
+        why = "Koordinátor sítě odpověděl nesrozumitelně."
+    elif status == "429":
+        why = "Koordinátor sítě odmítá tak časté dotazy."
+    elif status.isdigit():
+        why = "Koordinátor sítě požadavek odmítl (%s)." % status
+    else:
+        why = "Klíč se nepodařilo získat."
+    text = "Poslední pokus %s: %s" % (when, why)
+    try:
+        nxt = int(last.get("next_try", ""))
+    except (TypeError, ValueError):
+        nxt = 0
+    if nxt > time.time():
+        text += " Další pokus v %s." % time.strftime("%H:%M",
+                                                    time.localtime(nxt))
+    return text
+
+
+NET_DETAIL = {
+    "connecting": "Klíč je předaný, brána se hlásí do sítě — chvíli to trvá.",
+    "pending_manual": "Ručně vložený klíč čeká na převzetí.",
+    "paused": "Síť je pozastavená — v účtu sítě chybí kredit. Po dobití se "
+              "spojení samo obnoví.",
+    "needs_login": "Brána v privátní síti není — potřebuje nový klíč.",
+    "error": "Klíč se nepodařilo získat.",
+    "idle": "Brána zatím do privátní sítě připojená není.",
+}
+# Prázdná netmapa sama o sobě důvod neprozradí: takhle vypadá i čerstvě
+# připojená brána, ke které ještě není spárovaný telefon. Tvrdit uživateli,
+# který právě zaplatil, že mu chybí kredit, ho z toku odrazí — proto se text
+# o kreditu použije jen tehdy, když ho podpírá poslední pokus o klíč.
+NET_ALONE = ("Brána je v síti, ale nevidí žádné další zařízení: buď ještě "
+             "nemáš spárovaný telefon, nebo je účet sítě pozastavený.")
+# Stav hlásí sidecar; když se neozývá, klíč si nikdo nepřevezme a ovládání by
+# jinak navěky ukazovalo „Připojuji…“.
+NET_NO_REPORT = ("Krabička stav sítě nehlásí — zkus restartovat aplikaci "
+                 "miniserveru.")
+NET_KEY_DEAD = ("Klíč pro bránu propadl dřív, než si ho síť převzala — "
+                "potřebuje nový (tlačítko Připojit bránu, nebo ručně "
+                "vložený klíč).")
+
+
+def net_state():
+    """Stav brány v privátní síti pro celé ovládání. Jeden ze sedmi stavů:
+    connected, connecting, pending_manual, paused, needs_login, error, idle.
+
+    Zastaralé hlášení sidecaru je neznámo (ne odhlášení); mez drží
+    [ts_state_max_age] a během přihlašování je delší. Pořadí
+    pravidel drží kontrakt: připojená brána s prázdnou netmapou je pozastavení
+    (klíč se nežádá), předaný klíč je připojování a chyba posledního pokusu má
+    přednost před „chybí klíč“, aby uživatel viděl důvod, ne jen následek.
+    Chybějící kredit jako důvod prázdné netmapy se tvrdí jen s oporou
+    v posledním pokusu o klíč (příznak paused_credits); jinak se stav popíše
+    neutrálně, protože prázdnou netmapu má i brána bez spárovaného telefonu."""
+    out = {"state": "idle", "ip": "", "backend": "", "peers": None,
+           "stale": False, "untagged": False, "busy": False, "ready": False,
+           "paused_credits": False, "last": "",
+           "label": NET_LABEL["idle"][0], "cls": NET_LABEL["idle"][1],
+           "detail": NET_DETAIL["idle"]}
+    if not TS_DIR:
+        return out
+    st = ts_state()
+    fresh = ts_state_fresh(st)
+    # prázdný adresář = starší verze sítě, která stav nehlásí vůbec
+    reported = bool(st.get("updated") or st.get("backend"))
+    backend = st.get("backend", "") if fresh else ""
+    peers = _ts_peers(st) if fresh else None
+    ip = ts_ip()
+    now = time.time()
+    key_waiting = os.path.exists(ts_path("authkey"))
+    meta = _kv_read(ts_path("key_meta"))
+    origin = meta.get("origin", "")
+    try:
+        key_expires = int(meta.get("expires_epoch", ""))
+    except (TypeError, ValueError):
+        key_expires = 0
+    # Nepřevzatý klíč po platnosti: běžící sidecar by ho zahodil sám, takže
+    # když tu pořád leží, je to chyba, ne průběh.
+    key_dead = key_waiting and 0 < key_expires <= now
+    try:
+        unclaimed = (now - os.stat(ts_path("authkey")).st_mtime
+                     if key_waiting else 0.0)
+    except OSError:
+        unclaimed = 0.0
+    want_key = os.path.exists(ts_path("want_key"))
+    last = gateway_last_read()
+    # kredit jako důvod prázdné netmapy se tvrdí, jen když ho podpírá poslední
+    # pokus o klíč (odpověď koordinátora), ne pouhá nula v netmapě
+    paused_credits = gateway_last_failed(last) and (
+        last.get("error") == "no_credits"
+        or (last.get("error") == "device_limit"
+            and last.get("limited_by") == "credits"))
+    with _gw_lock:
+        blocked = _gw["stop"] or _gw["auto_off"]
+        # čeká se na odpověď koordinátora nebo na nejbližší tik vlákna
+        busy = bool(_gw["queued"] or _gw["running"])
+    if backend == "Running" and peers == 0:
+        state = "paused"
+    elif backend == "Running":
+        state = "connected"
+    elif backend == "Starting" or (fresh and st.get("key") in ("pending",
+                                                               "inuse")):
+        state = "connecting"
+    elif key_waiting and not key_dead:
+        state = "connecting" if origin == "gateway" else "pending_manual"
+    elif gateway_last_failed(last) or blocked or key_dead:
+        state = "error"
+    elif want_key or backend in ("NeedsLogin", "NeedsMachineAuth", "Stopped",
+                                 "NoState"):
+        state = "needs_login"
+    elif ip and not reported:
+        # instalace se starším sidecarem: stav nehlásí nikdo, adresa je jediné,
+        # co o síti víme
+        state = "connected"
+    else:
+        state = "idle"
+    detail = NET_DETAIL.get(state, "")
+    label, cls = NET_LABEL[state]
+    # služba sítě se neozývá: buď hlásí zastaralý stav, nebo (u starší
+    # instalace, která stav nehlásí vůbec) si po pár ticích nevzala klíč
+    silent = ((reported and not fresh)
+              or (not reported and unclaimed > 3 * GATEWAY_TICK))
+    if state == "connected":
+        detail = ("Adresa krabičky v síti: %s" % ip if ip
+                  else "Brána je v síti, adresu ještě hlásí.")
+    elif state == "error":
+        if key_dead:
+            detail = NET_KEY_DEAD
+            if silent:
+                detail += " " + NET_NO_REPORT
+        else:
+            detail = gateway_last_text() or NET_DETAIL["error"]
+    elif state == "paused" and not paused_credits:
+        # prázdnou netmapu má i čerstvě připojená brána bez telefonu
+        label, cls = "Připojeno", "warn"
+        detail = NET_ALONE
+        if ip:
+            detail += " Adresa krabičky v síti: %s" % ip
+    elif state in NET_WAITING and silent:
+        detail += " " + NET_NO_REPORT
+    elif state == "idle" and reported and not fresh:
+        detail = NET_NO_REPORT
+    # Starší instalace visí v síti pod ručním klíčem bez značky brány: síť jim
+    # pak trasu ven nepustí a stupeň „i dál do sítě“ tiše nefunguje. Síť si
+    # o nový klíč řekne sama, ale uživatel musí vědět, proč se to děje.
+    untagged = state == "connected" and fresh and not st.get("tags")
+    if untagged:
+        detail += (" Síť ji ale zatím nevede jako bránu, takže stupeň "
+                   "„i dál do sítě“ nefunguje — připojení se samo obnoví "
+                   "novým klíčem.")
+        cls = "warn"
+    out.update(state=state, ip=ip, backend=backend, peers=peers,
+               stale=reported and not fresh, untagged=untagged, busy=busy,
+               ready=bool(ip) and state in ("connected", "paused"),
+               paused_credits=bool(state == "paused" and paused_credits),
+               label=label, cls=cls,
+               detail=detail, last=gateway_last_text())
+    return out
+
+
+def prov_xml(domain, ts_url="", ts_key="", ts_exit_node=""):
+    """Konfigurace účtu pro aplikaci v telefonu.
+
+    overwrite="true" u položek účtu: bez něj aplikace existující účet nepřepíše
+    (položku jen doplní, když chybí), takže druhé QR po změně adresy krabičky
+    nespraví ani doménu, ani heslo. Atribut patří výhradně na <entry>, na
+    <section> ho knihovna nezná, a porovnává se přesně s "true"."""
     sec = read_secrets()
     user = sec.get("SIP_USER", SIP_USER)
     password = sec.get("SIP_PASSWORD", "")
@@ -365,19 +1306,19 @@ def prov_xml(domain, ts_url="", ts_key=""):
     return """<?xml version="1.0" encoding="UTF-8"?>
 <config xmlns="http://www.linphone.org/xsds/lpconfig.xsd">
   <section name="proxy_0">
-    <entry name="reg_proxy">&lt;sip:%(domain)s;transport=udp&gt;</entry>
-    <entry name="reg_identity">%(ident)s</entry>
-    <entry name="reg_display_name">%(label)s</entry>
-    <entry name="reg_expires">600</entry>
-    <entry name="reg_sendregister">1</entry>
-    <entry name="publish">0</entry>
-    <entry name="dial_escape_plus">0</entry>
+    <entry name="reg_proxy" overwrite="true">&lt;sip:%(domain)s;transport=udp&gt;</entry>
+    <entry name="reg_identity" overwrite="true">%(ident)s</entry>
+    <entry name="reg_display_name" overwrite="true">%(label)s</entry>
+    <entry name="reg_expires" overwrite="true">600</entry>
+    <entry name="reg_sendregister" overwrite="true">1</entry>
+    <entry name="publish" overwrite="true">0</entry>
+    <entry name="dial_escape_plus" overwrite="true">0</entry>
   </section>
   <section name="auth_info_0">
-    <entry name="username">%(user)s</entry>
-    <entry name="userid">%(user)s</entry>
-    <entry name="passwd">%(passwd)s</entry>
-    <entry name="domain">%(domain)s</entry>
+    <entry name="username" overwrite="true">%(user)s</entry>
+    <entry name="userid" overwrite="true">%(user)s</entry>
+    <entry name="passwd" overwrite="true">%(passwd)s</entry>
+    <entry name="domain" overwrite="true">%(domain)s</entry>
   </section>
   <section name="video">
     <entry name="capture">0</entry>
@@ -392,20 +1333,30 @@ def prov_xml(domain, ts_url="", ts_key=""):
 """ % {"domain": html.escape(domain), "ident": ident,
        "label": html.escape(ACCOUNT_LABEL),
        "user": html.escape(user), "passwd": html.escape(password),
-       "network": network_section(ts_url, ts_key)}
+       "network": network_section(ts_url, ts_key, ts_exit_node)}
 
 
-def network_section(ts_url, ts_key):
+def network_section(ts_url, ts_key, ts_exit_node=""):
     """Přihlášení do privátní sítě přibalené k účtu — aplikace si podle něj
     postaví tunel dřív, než se pokusí o registraci. Klíč je jednorázový
-    a platí hodinu."""
-    if not (ts_url and ts_key):
+    a platí hodinu.
+
+    Sekce se vypíše, když je známé cokoli z trojice: adresa krabičky v síti se
+    posílá i tehdy, když se klíč pro telefon nepodařilo získat (telefon už
+    v síti být může a jen potřebuje vědět, kudy ven). Klíč jde bez overwrite —
+    aplikace ho po použití maže zápisem prázdné hodnoty."""
+    rows = []
+    if ts_url:
+        rows.append('    <entry name="ts_control_url" overwrite="true">%s</entry>'
+                    % html.escape(ts_url))
+    if ts_key:
+        rows.append('    <entry name="ts_authkey">%s</entry>' % html.escape(ts_key))
+    if ts_exit_node:
+        rows.append('    <entry name="ts_exit_node" overwrite="true">%s</entry>'
+                    % html.escape(ts_exit_node))
+    if not rows:
         return ""
-    return """
-  <section name="twentyone">
-    <entry name="ts_control_url">%s</entry>
-    <entry name="ts_authkey">%s</entry>
-  </section>""" % (html.escape(ts_url), html.escape(ts_key))
+    return '\n  <section name="twentyone">\n%s\n  </section>' % "\n".join(rows)
 
 
 MISSED_MODES = ("ring", "announce")
@@ -865,14 +1816,16 @@ def dav_import_start(user, raw):
 
 
 def dav_urls():
-    """Adresy, na kterých je úložiště vidět (domácí síť, privátní síť)."""
+    """Adresy, na kterých je úložiště vidět (domácí síť, privátní síť).
+    Adresa v privátní síti se nabídne, jen když brána opravdu visí v síti —
+    zastaralé ts/ip by slibovalo úložiště, na které se nikdo nepřipojí."""
     out = []
     lan = lan_ip()
     if lan:
         out.append(("domácí síť", "http://%s:%s/" % (lan, DAV_PORT)))
-    tun = ts_ip()
-    if tun:
-        out.append(("privátní síť", "http://%s:%s/" % (tun, DAV_PORT)))
+    ns = net_state()
+    if ns["ready"] and ns["ip"]:
+        out.append(("privátní síť", "http://%s:%s/" % (ns["ip"], DAV_PORT)))
     return out
 
 # Vzhled: gui = produktový (jednadvacet), expert = utilitární
@@ -959,8 +1912,9 @@ PAGE = PAGE.replace("ACCENT_COLOR", ACCENT)
 
 def render(active, body, extra=""):
     """Telefon je dostupný, až když krabička visí v privátní síti — dřív by
-    nastavení stejně nefungovalo."""
-    ready = bool(ts_ip()) if TS_DIR else True
+    nastavení stejně nefungovalo. Rozhoduje net_state(), ne samotná adresa:
+    ta v souboru zůstává i po odhlášení a záložka by se odemykala nadarmo."""
+    ready = net_state()["ready"] if TS_DIR else True
     if GUI:
         tabs = [(u("/"), "home", "Domů", True), (u("/sms"), "sms", "Zprávy", True),
                 (u("/telefon"), "phone", "Telefon", ready)]
@@ -1185,19 +2139,17 @@ def page_home(info=""):
             "\U0001F4F6", "Mobilní síť", "Neznámý stav", "bad",
             'nelze se zeptat ústředny — detail v <a href="%s">Pokročilé</a>'
             % u("/stav")))
-    ip = ts_ip()
-    if ip:
-        tiles.append(_tile(
-            "\U0001F512", "Privátní síť", "Připojeno", "ok",
-            'adresa krabičky <span class="mono">%s</span> · '
-            '<a href="%s">detail</a>' % (esc(ip), u("/net"))))
+    ns = net_state()
+    ip = ns["ip"]
+    if ns["state"] == "connected" and ip:
+        note = ('adresa krabičky <span class="mono">%s</span> · '
+                '<a href="%s">detail</a>' % (esc(ip), u("/net")))
     else:
-        tiles.append(_tile(
-            "\U0001F512", "Privátní síť", "Nepřipojeno", "warn",
-            '<a href="%s">vlož klíč privátní sítě</a> — telefon se pak dovolá '
-            "odkudkoli" % u("/net")))
+        note = '%s <a href="%s">detail</a>' % (esc(ns["detail"]), u("/net"))
+    tiles.append(_tile("\U0001F512", "Privátní síť", esc(ns["label"]),
+                       ns["cls"], note))
     sec = read_secrets()
-    if ip and sec.get("SIP_USER"):
+    if ns["ready"] and sec.get("SIP_USER"):
         tiles.append(_tile(
             "\U0001F4F1", "Telefon", "Připraveno", "ok",
             '<a href="%s">načti QR do aplikace Phone21</a> · '
@@ -1394,54 +2346,68 @@ def page_sms(sent_info=""):
 
 
 def page_net(info=""):
-    """Privátní síť (Umbrel): stav připojení, vložení auth klíče, SIP údaje."""
-    ip = ""
-    try:
-        ip = open(os.path.join(TS_DIR, "ip")).read().strip()
-    except OSError:
-        pass
-    pending = os.path.exists(os.path.join(TS_DIR, "authkey"))
-    sec = read_secrets()
-    # zákaznická doména; cockscale.twentyone.cz je jen technická adresa
-    # koordinátora (COCKSCALE_URL) a zákazník ji nemá vidět
-    dash = os.environ.get("NET_DASHBOARD_URL", "https://phone.twentyone.cz/pay")
+    """Privátní síť (Umbrel): stav brány, připojení jedním tlačítkem, záložní
+    ruční klíč a stupeň přístupu."""
+    ns = net_state()
+    dash = net_dashboard_url()
+    have_token = bool(read_partner_token())
     blocks = [info, "<h1>Privátní síť</h1>"]
-    if ip:
-        blocks.append('<p><span class="ok">Brána je připojená — adresa v privátní '
-                      "síti: <b>%s</b></span></p>" % esc(ip))
-    elif pending:
-        blocks.append('<p><span class="warn">Klíč vložen, připojuji…</span> '
-                      "<button onclick=\"location.reload()\">Obnovit</button></p>")
-    # Formulář je dostupný VŽDY (ne jen při prvním setupu): klíč platí 24 h,
-    # zobrazí se jen jednou, a po 90 dnech neplacení je potřeba nový.
     blocks.append(
-        "<p>%s auth klíč z <a href=\"%s\" target=\"_blank\">dashboardu "
-        "privátní sítě</a> (Přidat zařízení; klíč platí 24 h a zobrazí se "
-        "jen jednou):</p>"
-        '<form class="inline" method="post" action="%s">'
-        '<input name="authkey" placeholder="hskey-auth-..." size="40" required>'
-        "<button>Připojit</button></form>"
-        % ("Nové připojení / obnova po expiraci — vlož" if ip else
-           "Brána zatím není v privátní síti. Vlož", esc(dash),
-           u("/net/authkey")))
-    if ip:
+        '<p><span class="%s"><span class="dot %s"></span><b>%s</b></span> '
+        "%s</p>" % (ns["cls"], ns["cls"], esc(ns["label"]), esc(ns["detail"])))
+    if ns["paused_credits"]:
+        blocks.append('<p><a href="%s" target="_blank">Dobij kredit</a> '
+                      "a spojení naskočí samo, klíč znovu vkládat nemusíš.</p>"
+                      % esc(net_pay_url()))
+    elif ns["state"] == "paused":
+        # bez opory v odpovědi koordinátora se kredit nabízí jen jako jedna
+        # ze dvou možností, ne jako diagnóza
+        blocks.append('<p class="small muted">Jestli telefon spárovaný máš, '
+                      'zkontroluj kredit v <a href="%s" target="_blank">'
+                      "účtu sítě</a> — bez kreditu síť provoz zastaví.</p>"
+                      % esc(dash))
+    if ns["ready"]:
         blocks.append(
             '<p>Miniserver je v síti — teď připoj telefon na záložce '
             '<a href="%s">Telefon</a>.</p>' % u("/telefon"))
-    have_partner = bool(read_partner_token())
+    # Účet sítě: token je jediná věc, kterou sem uživatel opisuje. Klíč brány
+    # si podle něj ovládání vyžádá samo (a znovu po každém odregistrování).
     blocks.append(
-        "<h2>Token pro připojení telefonu</h2>"
-        "<p>Aby jeden QR kód nastavil telefonu účet i síť, potřebuje "
-        "miniserver token z tvého účtu sítě (vydá se na "
-        '<a href="%s" target="_blank">%s</a>, sekce token brány). Bez něj '
-        "QR nastaví jen účet a telefon do sítě připojíš ručně.</p>"
-        '<p class="small muted">Stav: %s</p>'
+        "<h2>Účet sítě</h2>"
+        "<p>Klíč pro bránu si miniserver vyzvedne sám — potřebuje k tomu token "
+        'z tvého účtu. Vydáš si ho na stránce <a href="%s" target="_blank">'
+        "Moje síť</a> v sekci <b>Brána (Umbrel)</b>; sekce se objeví, až budeš "
+        "mít kredit, a token se ukáže jen jednou.</p>"
+        '<p class="small muted">Brána i telefon zaberou v účtu každý jedno '
+        "místo, počítej tedy aspoň se dvěma kredity. Nejdřív připoj bránu, "
+        "teprve pak si nech vygenerovat QR pro telefon.</p>"
+        % esc(dash))
+    if have_token:
+        # hlavní cesta: klíč si ovládání vyžádá samo, uživatel jen zmáčkne
+        blocks.append(
+            '<form class="inline" method="post" action="%s">'
+            "<button>Připojit bránu</button></form>"
+            '<p class="small muted">Vyžádá si klíč a předá ho síti. Odpověď '
+            "koordinátora trvá i půl minuty.</p>" % u("/net/gateway"))
+    if ns["last"]:
+        blocks.append('<p class="small muted">%s</p>' % esc(ns["last"]))
+    blocks.append(
+        '<p class="small muted">Stav tokenu: %s</p>'
         '<form class="inline" method="post" action="%s">'
-        '<input name="partner_token" placeholder="cspk_..." size="40" required>'
-        "<button>Uložit token</button></form>"
-        % (esc(dash), esc(dash),
-           "token uložen" if have_partner else "token zatím není",
-           u("/net/partner")))
+        '<input name="partner_token" placeholder="cspk_…" size="40" required>'
+        "<button%s>Uložit token</button></form>"
+        % ("uložen" if have_token else "zatím není", u("/net/partner"),
+           ' class="ghost"' if have_token else ""))
+    # Ruční klíč zůstává jako záložní cesta (token mít nemusíš). Klíč platí
+    # 24 h, zobrazí se jen jednou; po 30 dnech bez kreditu je potřeba nový.
+    blocks.append(
+        "<details%s><summary>Připojit ručně klíčem</summary>"
+        "<p>Záložní cesta bez tokenu: v Mojí síti si nech vydat klíč pro nové "
+        "zařízení (platí 24 h a zobrazí se jen jednou) a vlož ho sem.</p>"
+        '<form class="inline" method="post" action="%s">'
+        '<input name="authkey" placeholder="klíč z Mojí sítě" size="40" required>'
+        "<button>Připojit</button></form></details>"
+        % (" open" if ns["state"] == "error" else "", u("/net/authkey")))
     fw = firewall_state()
     if fw:
         if fw.startswith("active"):
@@ -1472,11 +2438,17 @@ def page_net(info=""):
             "<li><b>celý miniserver</b> — všechny jeho služby včetně vzdálené "
             "správy a ostatních aplikací; dál než na miniserver se nedostane;</li>"
             "<li><b>i dál do sítě</b> — miniserver navíc propouští provoz do "
-            "domácí sítě a ven (výstupní uzel). Aby to fungovalo, musí trasu "
-            "schválit i správa sítě.</li></ul>"
+            "domácí sítě a ven (výstupní uzel). Nic dalšího se nepotvrzuje, "
+            "přepnutí se projeví do zhruba půl minuty. V telefonu si pak "
+            "vyber miniserver jako výstupní uzel; potřebuje k tomu aplikaci "
+            "21p.34 nebo novější.</li></ul>"
             "<p>Stav: <b>%s</b></p>%s"
             % (fw_cls, esc(fw_txt), esc(ACCESS_LABEL[level]), choices))
-    return render("net", "".join(blocks))
+    # Ve stavech, kde se čeká na odpověď sítě, se stránka sama obnovuje —
+    # jinak by uživatel koukal na „připojuji“ a musel mačkat obnovení ručně.
+    return render("net", "".join(blocks),
+                  NET_REFRESH if ns["state"] in NET_WAITING or ns["busy"]
+                  else "")
 
 
 def _dav_user_row(name):
@@ -1564,13 +2536,22 @@ def page_dav(info=""):
 def page_phone(info=""):
     """Připojení telefonu: QR kód + ruční údaje."""
     sec = read_secrets()
-    ip = ts_ip()
+    ns = net_state()
+    ip = ns["ip"]
     blocks = [info, "<h1>Telefon</h1>"]
     if not sec.get("SIP_USER"):
         blocks.append('<p class="bad">[OVL-E05] Nejde přečíst přihlašovací údaje '
                       "brány — zkus restartovat aplikaci.</p>")
         return render("phone", "".join(blocks))
-    if not ip:
+    if ns["paused_credits"]:
+        # jen s oporou v odpovědi koordinátora: prázdná netmapa sama znamená
+        # i „brána je v síti, telefon ještě není“, a v tom případě QR funguje
+        blocks.append(
+            '<p class="warn">Síť je pozastavená — v účtu chybí kredit, takže '
+            "telefon k miniserveru zvenku nedosáhne a nový klíč se teď vydat "
+            'nedá. Podrobnosti na záložce <a href="%s">Síť</a>.</p>'
+            % u("/net"))
+    elif not ns["ready"]:
         blocks.append(
             '<p class="warn">Krabička zatím není v privátní síti, takže se '
             "k ní telefon zvenku nedovolá. Připoj ji na záložce "
@@ -2076,28 +3057,46 @@ class Handler(BaseHTTPRequestHandler):
                 info = '<p class="bad">[OVL-E18] Chyba spojení s telefonní částí: %s</p>' % esc(e)
             return self._html(page_sms(info))
         if self.path == "/telefon/qr":
-            ip = ts_ip()
-            if not ip:
+            ns = net_state()
+            if not ns["ready"]:
+                # zastaralá adresa v ts/ip sem dřív pouštěla i u mrtvé sítě
+                # a telefon si pak stáhl konfiguraci, kterou nešlo použít
                 return self._html(page_phone(
-                    '<p class="bad">[OVL-E10] Nejdřív připoj miniserver do privátní sítě '
-                    "(záložka Síť).</p>"))
-            host = lan_ip() or ip
+                    '<p class="bad">[OVL-E10] %s Nejdřív to sprav na záložce '
+                    "Síť.</p>" % esc(ns["detail"])))
+            host = lan_ip() or ns["ip"]
             url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token())
             return self._html(page_qr(url))
         if self.path == "/net/authkey" and TS_DIR:
             key = form.get("authkey", "").strip()
-            # auth klíče: base64-like tokeny (headscale hskey-auth-…)
-            if not re.match(r"^[A-Za-z0-9_-]{20,200}$", key):
-                return self._html(page_net('<p class="bad">[OVL-E11] Tohle nevypadá jako auth klíč.</p>'))
+            # klíče koordinátora: base64-like tokeny, stejný tvar pro obě cesty
+            if not PARTNER_KEY_RE.match(key):
+                return self._html(page_net(
+                    '<p class="bad">[OVL-E11] Tohle nevypadá jako klíč do '
+                    "sítě.</p>"))
             try:
-                path = os.path.join(TS_DIR, "authkey")
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "w") as f:
-                    f.write(key)
+                # stejný kanál i pořadí jako u klíče z tlačítka: metadata
+                # těsně před klíčem a oboje atomicky, aby si sidecar nevzal
+                # rozepsaný soubor
+                hand_key_over(key, "manual", PARTNER_URL,
+                              time.time() + MANUAL_KEY_TTL)
+                audit("net/authkey ip=%s ruční klíč" % self.client_address[0])
                 info = '<p class="ok">Klíč uložen — připojuji do privátní sítě.</p>'
             except OSError as e:
                 info = '<p class="bad">[OVL-E12] Nejde uložit klíč: %s</p>' % esc(e)
             return self._html(page_net(info))
+        if self.path == "/net/gateway" and TS_DIR:
+            # jen zařadit a hned odpovědět: volání koordinátora trvá desítky
+            # sekund a stránka na ně čekat nesmí
+            err = gateway_request()
+            audit("net/gateway ip=%s%s"
+                  % (self.client_address[0], " odmítnuto" if err else ""))
+            if err:
+                return self._html(page_net(
+                    '<p class="bad">[OVL-E30] %s</p>' % esc(err)))
+            return self._html(page_net(
+                '<p class="ok">Připojuji bránu do sítě — může to trvat i půl '
+                "minuty. Stránka se sama obnovuje, stav uvidíš tady.</p>"))
         if self.path == "/net/partner":
             token = form.get("partner_token", "").strip()
             if not re.match(r"^cspk_[A-Za-z0-9_-]{10,200}$", token):
@@ -2106,6 +3105,8 @@ class Handler(BaseHTTPRequestHandler):
                     "(začíná cspk_).</p>"))
             try:
                 save_partner_token(token)
+                # nový token ruší i zákaz po neplatném tokenu
+                gateway_backoff_clear()
                 info = '<p class="ok">Token uložen — QR teď nastaví i síť.</p>'
             except OSError as e:
                 info = '<p class="bad">[OVL-E14] Nejde uložit token: %s</p>' % esc(e)
@@ -2146,11 +3147,11 @@ class Handler(BaseHTTPRequestHandler):
                 except FileNotFoundError:
                     pass
                 audit("net/access ip=%s value=%s" % (self.client_address[0], level))
-                info = ('<p class="ok">Nastaveno: <b>%s</b>. Projeví se do 15 s '
-                        "a přežije restart.%s</p>"
-                        % (esc(ACCESS_LABEL[level]),
-                           " Trasu ještě musí schválit správa sítě."
-                           if level == "router" else ""))
+                # filtr se přepíná do 15 s, inzerce výstupního uzlu jeden
+                # průchod smyčky sítě — pro uživatele tedy „do půl minuty“
+                info = ('<p class="ok">Nastaveno: <b>%s</b>. Projeví se do '
+                        "zhruba půl minuty a přežije restart.</p>"
+                        % esc(ACCESS_LABEL[level]))
             except OSError as e:
                 info = ('<p class="bad">[OVL-E23] Nejde uložit volbu přístupu: '
                         "%s</p>" % esc(e))
@@ -2217,7 +3218,9 @@ class ProvHandler(BaseHTTPRequestHandler):
         if err:
             print("[prov] stažení z %s: účet ano, síť ne — %s"
                   % (self.client_address[0], err), flush=True)
-        data = prov_xml(ip, ts_url, ts_key).encode()
+        # adresu krabičky v síti telefon dostane i bez klíče — bez ní by aplikace
+        # neměla kudy pouštět provoz ven a zkoušela by to přes cizí uzel
+        data = prov_xml(ip, ts_url, ts_key, ip).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/xml; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -2232,6 +3235,9 @@ def main():
         prov = ThreadingHTTPServer(("0.0.0.0", PROV_PORT), ProvHandler)
         threading.Thread(target=prov.serve_forever, daemon=True).start()
         print("provisioning softphonu na :%d" % PROV_PORT, flush=True)
+        threading.Thread(target=gateway_loop, daemon=True).start()
+        print("hlídání připojení brány běží (tik %d s)" % GATEWAY_TICK,
+              flush=True)
     srv = ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), Handler)
     print("phone21-ui na :%d" % WEBUI_PORT, flush=True)
     srv.serve_forever()

@@ -9,8 +9,9 @@
 #   mkdir -p data/{smsdata,spool,astlog,ts-state}
 #   docker compose -f docker-compose.standalone.yml up -d
 #   → web UI: http://<host>:8090 (heslo WEBUI_PASSWORD z env/.env)
-#   → záložka Síť: vložit klíč privátní sítě; po připojení tam najdeš
-#     údaje pro telefon
+#   → záložka Síť: vložit token brány a dát „Připojit bránu“ — o klíč si
+#     ovládání řekne koordinátoru samo (ruční vložení klíče tam zůstává jako
+#     záložní cesta); po připojení tam najdeš údaje pro telefon
 #
 # Env (volitelně přes .env): WEBUI_PASSWORD (povinné), COUNTRY_CODE,
 # COCKSCALE_URL, TZ, MODEM_BY_ID (viz níže).
@@ -93,6 +94,10 @@ services:
       DAV_DIR: /var/lib/phone21-dav
       DAV_PORT: "5232"
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
+      # adresa koordinátoru privátní sítě: ovládání si přes ni samo vyžádá
+      # klíč brány (tlačítko „Připojit bránu“) a klíč pro telefon do QR
+      COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
+      NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/dashboard}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -103,6 +108,10 @@ services:
       - ./data/astlog:/var/log/asterisk:ro
 
   net:
+    # Služba privátní sítě (telemetrie vypnutá). Běží VŽDY, i bez klíče:
+    # ovládání z ní bere stav a bez běžící služby by neměl kdo hlásit, že
+    # brána v síti není. Klíč si ovládání vyžádá u koordinátoru samo a předá
+    # ho sdíleným adresářem, nikdy argumentem.
     image: tailscale/tailscale:v1.86.2
     container_name: phone21-net
     restart: unless-stopped
@@ -113,36 +122,575 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       TS_NO_LOGS_NO_SUPPORT: "true"
+      # mrtvá proměnná: čte ji jen výchozí vstupní bod obrazu, který se tu
+      # nespouští (cestu ke stavu si smyčka předává sama)
       TS_STATE_DIR: /var/lib/tailscale
+      # záložní adresa koordinátoru pro přihlášení, když ji nenesou
+      # metadata u klíče
       COCKSCALE_URL: ${COCKSCALE_URL:-https://cockscale.twentyone.cz}
     volumes:
       - ./data/ts-state:/var/lib/tailscale
+      # sdílený adresář s ovládáním a ústřednou; práva zakládá ústředna
       - ./data/smsdata/ts:/phone21-ts
     entrypoint: ["/bin/sh", "-c"]
+    # POZOR: blok níž je generovaný ze zdroje docker/ts-sidecar.sh
+    # (scripts/gen-compose-sidecar.py). Ručně se tady needituje — změna patří
+    # do skriptu, pak se generátor pustí znovu. Kontrakt: docs/ts-protokol.md.
     command:
       - |
-        until [ -s /phone21-ts/authkey ] || [ -s /var/lib/tailscale/tailscaled.state ]; do sleep 5; done
-        tailscaled --state=/var/lib/tailscale/tailscaled.state &
-        sleep 3
-        if [ -s /phone21-ts/authkey ]; then
-          tailscale up --login-server="$${COCKSCALE_URL}" --authkey="$$(cat /phone21-ts/authkey)" --accept-dns=false && rm -f /phone21-ts/authkey
-        fi
-        # výstupní uzel se nabízí jen při volbě „i dál do sítě" v ovládání
-        last=""
-        while true; do
-          ip="$$(tailscale ip -4 2>/dev/null | head -1)"
-          [ -n "$$ip" ] && echo "$$ip" > /phone21-ts/ip
-          want="$$(cat /phone21-ts/tunnel_access 2>/dev/null)"
-          [ "$$want" = "router" ] || want="off"
-          if [ "$$want" != "$$last" ]; then
-            if [ "$$want" = "router" ]; then
-              tailscale set --advertise-exit-node=true && last="$$want"
+        # >>> ts-sidecar (generováno scripts/gen-compose-sidecar.py) >>>
+        #!/bin/sh
+        #
+        # Phone21 — smyčka služby privátní sítě (kontejner „net“).
+        #
+        # Zdroj pravdy pro chování je tenhle soubor; do všech tří compose souborů ho
+        # mechanicky vkládá scripts/gen-compose-sidecar.py, ručně se v nich needituje.
+        # Kontrakt sdíleného adresáře ts/ i důvody jednotlivých pravidel jsou
+        # v docs/ts-protokol.md.
+        #
+        # Jeden průchod smyčky (10 s):
+        #   1) živost služby na pozadí a jeden dotaz na stav
+        #   2) rozhodnutí (žádost o klíč, volba výstupního uzlu)
+        #   3) převzetí klíče a přihlášení
+        #   4) atomický zápis stavu pro ovládání
+        #   5) inzerce výstupního uzlu podle volby přístupu
+        #
+        # Čistý busybox sh: jen vestavěné nástroje obrazu, nic dalšího se neinstaluje.
+        #
+        # Prostředí (vše nepovinné):
+        #   P21_TS_DIR      sdílený adresář (výchozí /phone21-ts)
+        #   P21_TSD_STATE   soubor stavu služby na pozadí
+        #   P21_SOCK        socket služby na pozadí
+        #   P21_TICK        perioda smyčky v sekundách (výchozí 10; 0 = nečekat)
+        #   P21_MAX_PASSES  konec po N průchodech (0 = nikdy; používá to jen test)
+        #   P21_NO_DAEMON   1 = smyčka službu na pozadí sama nespouští (jen test)
+        #   COCKSCALE_URL   záložní adresa koordinátoru, když ji nenese klíč
+
+        set -u
+
+        TS="$${P21_TS_DIR:-/phone21-ts}"
+        TSD_STATE="$${P21_TSD_STATE:-/var/lib/tailscale/tailscaled.state}"
+        SOCK="$${P21_SOCK:-/var/run/tailscale/tailscaled.sock}"
+        TICK="$${P21_TICK:-10}"
+        MAX_PASSES="$${P21_MAX_PASSES:-0}"
+        NO_DAEMON="$${P21_NO_DAEMON:-0}"
+        FALLBACK_URL="$${COCKSCALE_URL:-}"
+
+        IP_GRACE=6        # kolik průchodů mimo připojený stav, než se smaže ts/ip
+        WANT_MAX=6        # nejvíc žádostí o klíč za hodinu, pak už jen na stisk
+        TSD_MAX_FAILS=5   # po kolika marných startech se jen čeká místo restartu
+        READY_TRIES=60    # kolik sekund se čeká, než služba na pozadí odpoví
+
+        # Soubory zakládá s právy skupiny ovládání (adresář má setgid, viz kontrakt).
+        umask 002
+
+        BACKEND=unknown   # stav podle posledního dotazu
+        PEERS=-1          # počet protějšků; -1 = nepřečteno, nikdy se nebere jako pozastavení
+        TAGS=""           # zařazení uzlu u koordinátoru
+        TAGS_KNOWN=0      # 1 = zařazení se opravdu podařilo přečíst
+        IP4=""            # poslední známá adresa v privátní síti
+        KEYSTATE=none     # none|pending|inuse|accepted|rejected|expired
+        LAST_ERROR=""     # jeden řádek pro ovládání, nikdy klíč
+        STATE_LS=""       # adresa, se kterou je uzel opravdu přihlášený
+        LS=""             # adresa, se kterou se bude přihlašovat
+        WANT=false        # má se nabízet výstupní uzel?
+        ADV=""            # co už bylo nastavené (prázdné = nevíme)
+        OFFCNT=0          # průchodů v řadě mimo připojený stav
+        TSD=""            # číslo procesu služby na pozadí
+        TSD_FAILS=0
+        WANT_LOG=""       # časy posledních žádostí o klíč (strop za hodinu)
+        LOGOUT_DONE=0
+        STATE_FAIL=0      # 1 = zápis stavu neprochází (hlásí se jen změna)
+        PASS=0
+        NOW=0
+
+        log() { printf '[net] %s\n' "$$*"; }
+
+        # Hodnota z textového souboru klíč=hodnota (první výskyt).
+        meta_get() {
+          [ -f "$$1" ] || return 0
+          sed -n "s/^$$2=//p" "$$1" 2>/dev/null | sed -n '1p'
+        }
+
+        # Jeden řádek pro ovládání: bez řídicích znaků, bez fragmentu s klíčem, krátký.
+        # Text teď může pocházet i z chybového výstupu nástroje, kam se klíč dostat může
+        # (nástroj ho v hlášce cituje), proto se zahazuje i všechno ve tvaru klíče.
+        clean_err() {
+          printf '%s' "$$1" \
+            | sed -e 's/--auth-key=[^ ]*/--auth-key=***/g' \
+                  -e 's/tskey-[^ ]*/***/g' -e 's/hskey-[^ ]*/***/g' \
+                  -e 's/[[:cntrl:]]/ /g' \
+            | sed -n '1p' \
+            | sed 's/\(.\{0,200\}\).*/\1/'
+        }
+
+        # Zbývá ještě žádost o klíč v hodinovém stropu?
+        rate_ok() {
+          rl_new=""
+          rl_n=0
+          for rl_t in $$WANT_LOG; do
+            if [ $$((NOW - rl_t)) -lt 3600 ]; then
+              rl_new="$$rl_new $$rl_t"
+              rl_n=$$((rl_n + 1))
+            fi
+          done
+          WANT_LOG="$$rl_new"
+          [ "$$rl_n" -lt "$$WANT_MAX" ]
+        }
+
+        # Signál „potřebuju nový klíč“. Vzniká přes O_CREAT|O_EXCL, takže opakovaný
+        # průchod nepřepíše čas prvního výskytu; maže ho ovládání i tahle smyčka.
+        want_key() {
+          [ -e "$$TS/want_key" ] && return 0
+          [ -e "$$TS/authkey" ] && return 0
+          [ -e "$$TS/authkey.inuse" ] && return 0
+          if ! rate_ok; then
+            LAST_ERROR=key_requests_throttled
+            return 1
+          fi
+          # Soubor vzniká rovnou s obsahem: O_CREAT|O_EXCL zůstává, ale nevzniká okno,
+          # ve kterém ovládání vidí značku bez důvodu, a doplnění obsahu už nemůže
+          # obnovit značku, kterou mezitím smazalo ovládání po zápisu nového klíče.
+          ( set -C; printf 'reason=%s\nsince=%s\n' "$$1" "$$NOW" > "$$TS/want_key" ) 2>/dev/null || return 1
+          WANT_LOG="$$WANT_LOG $$NOW"
+          log "žádost o nový klíč ($$1)"
+          return 0
+        }
+
+        # --- fáze 1: živost služby na pozadí a jeden dotaz na stav ------------------
+
+        start_daemon() {
+          [ "$$NO_DAEMON" = 1 ] && return 0
+          tailscaled --state="$$TSD_STATE" &
+          TSD=$$!
+          log "služba na pozadí spuštěna"
+          return 0
+        }
+
+        # Čeká se na odpověď, ne slepě na čas.
+        wait_ready() {
+          [ "$$NO_DAEMON" = 1 ] && return 0
+          wr=0
+          while [ "$$wr" -lt "$$READY_TRIES" ]; do
+            tailscale status --json >/dev/null 2>&1 && return 0
+            [ -S "$$SOCK" ] && return 0
+            wr=$$((wr + 1))
+            sleep 1
+          done
+          return 1
+        }
+
+        supervise() {
+          [ "$$NO_DAEMON" = 1 ] && return 0
+          if [ -z "$$TSD" ]; then
+            start_daemon
+            # Čekání na službu trvá až READY_TRIES sekund a smyčka je jedno vlákno:
+            # stav se zapíše ještě před ním, jinak ho ovládání označí za zastaralý.
+            write_state
+            wait_ready || LAST_ERROR=daemon_not_ready
+            return 0
+          fi
+          kill -0 "$$TSD" 2>/dev/null && return 0
+          TSD_FAILS=$$((TSD_FAILS + 1))
+          BACKEND=unknown
+          PEERS=-1
+          LAST_ERROR=daemon_down
+          log "služba na pozadí spadla (pokus $$TSD_FAILS)"
+          if [ "$$TSD_FAILS" -ge "$$TSD_MAX_FAILS" ]; then
+            # Nepadat do restartové smyčky: zapsat stav a chvíli počkat.
+            write_state
+            [ "$$TICK" -gt 0 ] && sleep 60
+            TSD_FAILS=0
+          fi
+          start_daemon
+          write_state
+          wait_ready || LAST_ERROR=daemon_not_ready
+          return 0
+        }
+
+        # Jeden dotaz na stav rozebraný sedem. Když se nic nepřečte, je to unknown —
+        # nikdy ne NeedsLogin, jinak by změna tvaru výstupu spustila lavinu žádostí.
+        read_status() {
+          BACKEND=unknown
+          PEERS=-1
+          TAGS=""
+          TAGS_KNOWN=0
+
+          st_json=$$(tailscale status --json 2>/dev/null)
+
+          st_backend=$$(printf '%s\n' "$$st_json" \
+            | sed -n 's/.*"BackendState"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            | sed -n '1p')
+          case "$$st_backend" in
+            Running|Starting|NeedsLogin|NeedsMachineAuth|Stopped|NoState)
+              BACKEND="$$st_backend"
+              ;;
+            *)
+              LAST_ERROR=status_unparsed
+              st_ip=$$(tailscale ip -4 2>/dev/null | sed -n '1p')
+              case "$$st_ip" in
+                ""|*[!0-9.]*) : ;;
+                *) IP4="$$st_ip" ;;
+              esac
+              return 0
+              ;;
+          esac
+
+          # Počet protějšků: klíče mapy protějšků jsou vlastní řádky. Chybí-li mapa
+          # úplně, je to nepřečteno (-1), ne prázdná síť (0).
+          st_haspeer=$$(printf '%s\n' "$$st_json" \
+            | sed -n 's/^[[:space:]]*"Peer"[[:space:]]*:.*/y/p' | sed -n '1p')
+          if [ "$$st_haspeer" = y ]; then
+            st_n=$$(printf '%s\n' "$$st_json" \
+              | sed -n 's/^[[:space:]]*"nodekey:[0-9a-fA-F]\{1,\}"[[:space:]]*:.*/y/p' \
+              | sed -n '$$=')
+            PEERS="$${st_n:-0}"
+          fi
+
+          # Zařazení uzlu se bere jen z vlastního záznamu. Když se blok nepodaří
+          # ohraničit (jiné odsazení, jiný tvar), platí „nevíme“ — na prázdné zařazení
+          # se totiž váže odhlášení a to se nesmí stát omylem.
+          st_self=$$(printf '%s\n' "$$st_json" \
+            | sed -n '/^[[:space:]]*"Self"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]\{0,3\}},\{0,1\}$$/p')
+          st_inner=$$(printf '%s\n' "$$st_self" \
+            | sed -n 's/^[[:space:]]*"Peer"[[:space:]]*:.*/y/p' | sed -n '1p')
+          st_ok=$$(printf '%s\n' "$$st_self" \
+            | sed -n 's/.*"PublicKey"[[:space:]]*:.*/y/p' | sed -n '1p')
+          if [ -n "$$st_self" ] && [ -z "$$st_inner" ] && [ "$$st_ok" = y ]; then
+            TAGS_KNOWN=1
+            for st_t in $$(printf '%s\n' "$$st_self" | sed -n 's/.*"\(tag:[^"]*\)".*/\1/p'); do
+              TAGS="$${TAGS:+$$TAGS,}$$st_t"
+            done
+          fi
+
+          st_ip=$$(tailscale ip -4 2>/dev/null | sed -n '1p')
+          case "$$st_ip" in
+            ""|*[!0-9.]*) : ;;
+            *) IP4="$$st_ip" ;;
+          esac
+          return 0
+        }
+
+        # --- fáze 2: rozhodnutí -----------------------------------------------------
+
+        decide() {
+          # Volba přístupu (chybí = nejnižší stupeň).
+          de_acc=$$(sed -n '1{s/[[:space:]]//g;p;}' "$$TS/tunnel_access" 2>/dev/null)
+          case "$$de_acc" in
+            router) WANT=true ;;
+            *) WANT=false ;;
+          esac
+
+          # Adresa pro přihlášení: přednost mají metadata u klíče, záloha z prostředí.
+          LS=$$(meta_get "$$TS/key_meta" login_server)
+          [ -n "$$LS" ] || LS="$$FALLBACK_URL"
+
+          case "$$BACKEND" in
+            Running)
+              if [ "$$TAGS_KNOWN" = 1 ] && [ -z "$$TAGS" ]; then
+                # Stará instalace: uzel není u koordinátora veden jako brána, takže mu
+                # cesty ven nikdy neschválí. Jednou odhlásit a požádat o nový klíč.
+                if [ "$$LOGOUT_DONE" = 0 ]; then
+                  LOGOUT_DONE=1
+                  tailscale logout >/dev/null 2>&1
+                  # Čísla z dotazu PŘED odhlášením už neplatí. Dvojice připojeno +
+                  # nula protějšků je pro ovládání definice pozastavené sítě, takže
+                  # by uzlu, který se právě odhlásil, hlásilo chybějící kredit — a
+                  # o klíč, kvůli kterému se odhlašuje, by se při Running nežádalo.
+                  BACKEND=NeedsLogin
+                  PEERS=-1
+                  TAGS=""
+                  TAGS_KNOWN=0
+                  ADV=""
+                  LAST_ERROR=untagged_node
+                  log "uzel není veden jako brána, bude potřeba nový klíč"
+                fi
+                want_key untagged
+              else
+                LOGOUT_DONE=0
+                rm -f "$$TS/want_key" 2>/dev/null
+              fi
+              ;;
+            NeedsLogin)
+              want_key needs_login
+              ;;
+            Stopped|NoState)
+              want_key no_state
+              ;;
+            *)
+              # Starting, NeedsMachineAuth i unknown: nedělá se nic. U prvních dvou
+              # by klíč nepomohl, u třetího nevíme, co se stalo.
+              :
+              ;;
+          esac
+          return 0
+        }
+
+        # --- fáze 3: převzetí klíče a přihlášení ------------------------------------
+
+        handle_key() {
+          # Převzetí je přejmenování v jednom adresáři: je atomické, nepřečte
+          # rozepsaný soubor a nedá se udělat dvakrát. Obsah klíče se nikdy nečte.
+          if [ -f "$$TS/authkey" ]; then
+            if mv -f "$$TS/authkey" "$$TS/authkey.inuse" 2>/dev/null; then
+              KEYSTATE=inuse
+              log "převzat nový klíč"
             else
-              tailscale set --advertise-exit-node=false && last="$$want"
+              KEYSTATE=pending
             fi
           fi
-          sleep 60
+          [ -f "$$TS/authkey.inuse" ] || return 0
+          KEYSTATE=inuse
+
+          # (c) klíč, kterému vypršela platnost, se nezkouší
+          hk_exp=$$(meta_get "$$TS/key_meta" expires_epoch)
+          case "$$hk_exp" in
+            ""|*[!0-9]*) hk_exp=0 ;;
+          esac
+          if [ "$$hk_exp" -gt 0 ] && [ "$$NOW" -gt "$$hk_exp" ]; then
+            rm -f "$$TS/authkey.inuse"
+            KEYSTATE=expired
+            LAST_ERROR=key_expired
+            want_key key_expired
+            return 0
+          fi
+
+          if [ -z "$$LS" ]; then
+            LAST_ERROR=no_login_server
+            return 0
+          fi
+
+          # Pojistka proti spálení jednorázového klíče: přihlášený uzel se nepřihlašuje
+          # znovu na jinou adresu, než na které je.
+          if [ "$$BACKEND" = Running ] && [ -n "$$STATE_LS" ] && [ "$$LS" != "$$STATE_LS" ]; then
+            LAST_ERROR=login_server_mismatch
+            return 0
+          fi
+
+          # Klíč se předává souborem, nikdy argumentem (síť je hostitelská, argumenty
+          # vidí celý stroj). --reset vrací i nabídku výstupního uzlu do výchozího
+          # stavu, proto musí být --advertise-exit-node ve stejném volání.
+          # Přihlášení může trvat až --timeout: stav se zapíše ještě před ním, jinak
+          # by ho ovládání celou tu dobu mělo za zastaralý (mez je 45 s).
+          write_state
+
+          hk_out=$$(tailscale up --reset --login-server="$$LS" --auth-key=file:"$$TS/authkey.inuse" --accept-dns=false --advertise-exit-node="$$WANT" --timeout=90s --json 2>&1)
+          hk_rc=$$?
+          hk_jerr=$$(printf '%s\n' "$$hk_out" \
+            | sed -n 's/.*"Error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p')
+          hk_back=$$(printf '%s\n' "$$hk_out" \
+            | sed -n 's/.*"BackendState"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p')
+
+          if [ -z "$$hk_jerr" ] && { [ "$$hk_rc" = 0 ] || [ "$$hk_back" = Running ] || [ "$$hk_back" = Starting ]; }; then
+            rm -f "$$TS/authkey.inuse"
+            KEYSTATE=accepted
+            LAST_ERROR=""
+            STATE_LS="$$LS"
+            ADV="$$WANT"
+            # Stav se přečte znovu: čísla z doby před přihlášením by do stavu zapsala
+            # připojeno + nula protějšků, což je podle kontraktu pozastavená síť.
+            read_status
+            case "$$BACKEND" in
+              Running|Starting)
+                :
+                ;;
+              *)
+                case "$$hk_back" in
+                  Running|Starting)
+                    BACKEND="$$hk_back"
+                    PEERS=-1
+                    ;;
+                esac
+                ;;
+            esac
+            rm -f "$$TS/want_key" 2>/dev/null
+            log "uzel přihlášen"
+            return 0
+          fi
+
+          # Neúspěch. Důvod se hledá v CELÉM výstupu, ne jen v poli "Error" z JSONu:
+          # skutečný nástroj ho při chybě nevyplňuje a důvod tiskne na chybový výstup
+          # jako obyčejný text (proto se sbírá 2>&1). Kdyby se četlo jen pole, zůstala
+          # by celá tahle větev mrtvá a odmítnutý klíč by se zkoušel až do vypršení.
+          hk_err="$$hk_jerr"
+          if [ -z "$$hk_err" ]; then
+            hk_err=$$(printf '%s\n' "$$hk_out" | sed -n '/[^[:space:]]/{p;q;}')
+          fi
+
+          # Do rozhodování jde celý výstup malými písmeny, ale bez argumentu s klíčem
+          # a bez cesty ke klíči — jinak by slovo z vlastní příkazové řádky vypadalo
+          # jako hláška o odmítnutém klíči.
+          hk_low=$$(printf '%s\n' "$$hk_out" \
+            | sed -e 's/--auth-key=[^ ]*/ /g' -e 's![^ ]*/authkey[^ ]*! !g' \
+            | sed 'y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/')
+
+          # Za odmítnutí klíče se smí považovat jen doložitelné odmítnutí. Výpadek
+          # sítě, chyba překladu jména ani vypršení času klíč nezahazují — je
+          # jednorázový a zahodit ho znamená zbytečně žádat o další.
+          hk_reject=0
+          case "$$hk_low" in
+            *authkey*|*"auth key"*|*"auth-key"*|*unauthorized*|*"invalid key"*|*"key is invalid"*)
+              hk_reject=1
+              ;;
+          esac
+          # Vypršení se počítá jen u klíče k přihlášení. Vypršelý klíč UZLU se řeší
+          # novým přihlášením tímtéž klíčem, zahodit ho kvůli němu by znamenalo
+          # zbytečnou žádost o další.
+          case "$$hk_low" in
+            *authkey*expired*|*"auth key"*expired*|*"key expired"*) hk_reject=1 ;;
+          esac
+          # Neznámý přepínač (jiná verze nástroje) není odmítnutý klíč — v nápovědě,
+          # kterou nástroj v takovém případě vypíše, se o klíči taky píše.
+          case "$$hk_low" in
+            *"flag provided but not defined"*|*"flag needs an argument"*|*"usage:"*)
+              hk_reject=0
+              ;;
+          esac
+          case "$$hk_back" in
+            Running|Starting) hk_reject=0 ;;
+          esac
+
+          if [ "$$hk_reject" = 1 ]; then
+            rm -f "$$TS/authkey.inuse"
+            KEYSTATE=rejected
+            LAST_ERROR=$$(clean_err "$$hk_err")
+            want_key needs_login
+            log "klíč odmítnut"
+          else
+            KEYSTATE=inuse
+            if [ -n "$$hk_err" ]; then
+              LAST_ERROR=$$(clean_err "$$hk_err")
+            else
+              LAST_ERROR="up_failed rc=$$hk_rc"
+            fi
+          fi
+          return 0
+        }
+
+        # --- fáze 4: adresa a stav --------------------------------------------------
+
+        update_ip() {
+          if [ -n "$$IP4" ]; then
+            up_cur=$$(sed -n '1p' "$$TS/ip" 2>/dev/null)
+            if [ "$$up_cur" != "$$IP4" ]; then
+              printf '%s\n' "$$IP4" 2>/dev/null > "$$TS/.ip.tmp" \
+                && mv -f "$$TS/.ip.tmp" "$$TS/ip" 2>/dev/null \
+                || rm -f "$$TS/.ip.tmp" 2>/dev/null
+            fi
+          fi
+
+          case "$$BACKEND" in
+            Running|Starting)
+              # Pozastavená síť (žádné protějšky) adresu nemaže — uzel je pořád
+              # registrovaný, jen kolem něj nikdo není.
+              OFFCNT=0
+              ;;
+            unknown)
+              # Nepřečtený stav není důkaz odhlášení.
+              :
+              ;;
+            *)
+              OFFCNT=$$((OFFCNT + 1))
+              ;;
+          esac
+
+          # Adresa se maže až se zpožděním: ústředna po restartu bez ní zapeče
+          # náhradní adresu a telefon se nedovolá.
+          if [ "$$OFFCNT" -ge "$$IP_GRACE" ] && [ -e "$$TS/ip" ]; then
+            rm -f "$$TS/ip" 2>/dev/null
+            IP4=""
+            log "adresa v privátní síti smazána (uzel je dlouho odhlášený)"
+          fi
+          return 0
+        }
+
+        write_state() {
+          if {
+            printf 'backend=%s\n' "$$BACKEND"
+            printf 'peers=%s\n' "$$PEERS"
+            printf 'tags=%s\n' "$$TAGS"
+            printf 'ip=%s\n' "$$IP4"
+            printf 'login_server=%s\n' "$${STATE_LS:-$$LS}"
+            printf 'key=%s\n' "$$KEYSTATE"
+            printf 'last_error=%s\n' "$$LAST_ERROR"
+            printf 'updated=%s\n' "$$NOW"
+          } 2>/dev/null > "$$TS/.state.tmp" \
+            && mv -f "$$TS/.state.tmp" "$$TS/state" 2>/dev/null; then
+            STATE_FAIL=0
+          else
+            rm -f "$$TS/.state.tmp" 2>/dev/null
+            # Hlásí se jen změna: jinak by chybějící adresář zahltil záznam běhu.
+            if [ "$$STATE_FAIL" = 0 ]; then
+              STATE_FAIL=1
+              log "stav se nedaří zapsat do $$TS (adresář zakládá ústředna)"
+            fi
+          fi
+          return 0
+        }
+
+        # --- fáze 5: výstupní uzel --------------------------------------------------
+
+        advertise() {
+          [ "$$BACKEND" = Running ] || return 0
+          [ "$$WANT" != "$$ADV" ] || return 0
+          if tailscale set --advertise-exit-node="$$WANT" >/dev/null 2>&1; then
+            ADV="$$WANT"
+            log "nabídka výstupního uzlu: $$WANT"
+          else
+            LAST_ERROR=exit_node_set_failed
+          fi
+          return 0
+        }
+
+        # --- start ------------------------------------------------------------------
+
+        stop_all() {
+          [ -n "$$TSD" ] && kill "$$TSD" 2>/dev/null
+          return 0
+        }
+        trap 'stop_all; exit 0' INT TERM
+        trap 'stop_all' EXIT
+
+        if [ ! -d "$$TS" ]; then
+          log "sdílený adresář $$TS chybí — zakládá ho ústředna, čekám"
+        fi
+
+        # Navázání na předchozí běh: adresa a adresa koordinátoru, se kterou se uzel
+        # naposledy přihlásil.
+        STATE_LS=$$(meta_get "$$TS/state" login_server)
+        IP4=$$(sed -n '1p' "$$TS/ip" 2>/dev/null)
+
+        NOW=$$(date +%s)
+        start_daemon
+        # Stav se zapíše hned, ještě před čekáním na službu na pozadí: ovládání tak
+        # první minutu běhu nevidí zastaralý stav z minula, ale „nevíme“ s čerstvým
+        # časem.
+        write_state
+        wait_ready || LAST_ERROR=daemon_not_ready
+
+        while :; do
+          PASS=$$((PASS + 1))
+          NOW=$$(date +%s)
+
+          supervise
+          read_status
+          decide
+          handle_key
+          update_ip
+          write_state
+          advertise
+
+          if [ "$$MAX_PASSES" -gt 0 ] && [ "$$PASS" -ge "$$MAX_PASSES" ]; then
+            break
+          fi
+          if [ "$$TICK" -gt 0 ]; then
+            sleep "$$TICK"
+          fi
         done
+
+        stop_all
+        exit 0
+        # <<< ts-sidecar <<<
 
   # Kontakty a kalendář (server pro synchronizaci zařízení).
   dav:

@@ -16,7 +16,10 @@
 #                        (potřebuje NET_ADMIN a síť hostitele)
 #
 # SIP_DOMAIN: pevná hodnota z env, nebo prázdná → čeká se (max TS_WAIT s)
-# na /var/lib/phone21/ts/ip od tailscale sidecaru (tailnet IP brány).
+# na /var/lib/phone21/ts/ip od sidecaru (adresa brány v privátní síti);
+# když ani po čekání není, použije se poslední doména z $DATA/sip_domain
+# a teprve pak 127.0.0.1. Použitá doména se do $DATA/sip_domain vždy zapíše
+# (ovládání ji čte a pozná podle ní změnu adresy).
 
 set -u
 # Přechod ze starých názvů (drží se jedno vydání): staré proměnné i starý
@@ -24,6 +27,7 @@ set -u
 : "${PHONE21_SELFCONFIG:=${GSM2SIP_SELFCONFIG:-0}}"
 TPL=/opt/phone21/templates
 DATA="${PHONE21_DATA:-${GSM2SIP_DATA:-/var/lib/phone21}}"
+DATA="${DATA%/}"   # bez koncového lomítka — cesty se skládají i porovnávají
 LEGACY_DATA=/var/lib/gsm2sip
 SECRETS="$DATA/secrets.env"
 TS_IP_FILE="$DATA/ts/ip"
@@ -77,8 +81,9 @@ render() {
     log "vygenerována nová tajemství → $SECRETS"
   fi
 
-  # SIP_DOMAIN: env > tailnet IP ze sidecaru > 127.0.0.1 (provizorium,
-  # po připojení do privátní sítě se při dalším startu přerenderuje)
+  # SIP_DOMAIN: env > adresa v privátní síti ze sidecaru > poslední použitá
+  # doména > 127.0.0.1 (provizorium, po připojení do privátní sítě se při
+  # dalším startu přerenderuje)
   local domain="${SIP_DOMAIN:-}"
   if [[ -z "$domain" ]]; then
     local waited=0 ts_wait="${TS_WAIT:-60}"
@@ -86,7 +91,23 @@ render() {
       sleep 2; waited=$((waited + 2))
     done
     domain="$(cat "$TS_IP_FILE" 2>/dev/null || true)"
-    [[ -n "$domain" ]] || { domain="127.0.0.1"; log "POZOR: tailnet IP zatím není — SIP_DOMAIN provizorně $domain"; }
+    domain="${domain//[[:space:]]/}"
+    if [[ -z "$domain" ]]; then
+      # Adresa zrovna není (sidecar ji při odhlášení maže): poslední známá
+      # doména je pořád lepší než 127.0.0.1. Na tu se totiž telefon
+      # nedovolá a doména se určuje JEN při startu kontejneru, takže by
+      # ústředna zůstala mimo hru až do dalšího restartu.
+      domain="$(cat "$DATA/sip_domain" 2>/dev/null || true)"
+      domain="${domain//[[:space:]]/}"
+      [[ "$domain" == "127.0.0.1" ]] && domain=""
+      if [[ -n "$domain" ]]; then
+        log "adresa v privátní síti zatím není — beru poslední použitou doménu ($domain)"
+      fi
+    fi
+    if [[ -z "$domain" ]]; then
+      domain="127.0.0.1"
+      log "POZOR: adresa v privátní síti zatím není — SIP_DOMAIN provizorně $domain"
+    fi
   fi
 
   local ami_bind="${AMI_BIND:-127.0.0.1}"
@@ -112,8 +133,13 @@ render() {
     /^permit = / { n = split(perms, a, ","); for (i = 1; i <= n; i++) print "permit = " a[i]; next }
     { print }' /etc/asterisk/manager.conf > /tmp/manager.conf.new \
     && mv /tmp/manager.conf.new /etc/asterisk/manager.conf
-  mkdir -p "$DATA/queue" "$DATA/ts"
-  chown -R asterisk "$DATA" /etc/asterisk 2>/dev/null || true
+  mkdir -p "$DATA/queue"
+  chown -R asterisk /etc/asterisk 2>/dev/null || true
+  # ts/ se z rekurze vynechává: je to sdílený adresář a každý jeho soubor
+  # patří tomu, kdo ho píše (ovládání jako nobody s právy 0600, sidecar
+  # jako root). Rekurzivní chown by je přebral ústředně a ovládání by si
+  # po restartu vlastní soubory (např. stupeň přístupu) už nepřečetlo.
+  find "$DATA" -path "$DATA/ts" -prune -o -exec chown asterisk {} + 2>/dev/null || true
   # stav ovládání (token brány, tajemství 2FA) vlastní ovládání (nobody)
   # a jeho soubory jsou 0600 — chown výš ho nesmí sebrat, jinak po
   # restartu nejde přečíst token (QR bez klíče sítě) ani kód 2FA
@@ -123,7 +149,23 @@ render() {
   # přes skupinu, ne pro celý svět
   chgrp 65534 "$SECRETS" 2>/dev/null || true
   chmod 0640 "$SECRETS" 2>/dev/null || true
+  write_sip_domain "$domain"
   log "konfigurace vyrenderována (SIP_DOMAIN=$domain)"
+}
+
+# Doména, se kterou ústředna opravdu jede. Do secrets.env nepatří — ten se
+# píše jen při generování tajemství, takže by zůstala navždy ta první.
+# Ovládání soubor jen čte (DATA je pro něj read-only) a porovnává ho
+# s dnešní adresou v privátní síti: když se rozejdou, ví, že je potřeba
+# restartovat aplikaci a načíst telefonu nové QR.
+write_sip_domain() {
+  local d="${1:-}"
+  [[ -n "$d" ]] || return 0
+  printf '%s\n' "$d" > "$DATA/sip_domain.tmp" 2>/dev/null || return 0
+  mv "$DATA/sip_domain.tmp" "$DATA/sip_domain" 2>/dev/null \
+    || { rm -f "$DATA/sip_domain.tmp" 2>/dev/null; return 0; }
+  chgrp 65534 "$DATA/sip_domain" 2>/dev/null || true
+  chmod 0640 "$DATA/sip_domain" 2>/dev/null || true
 }
 
 # Společná příprava dat — běží VŽDY (i v LXC režimu bez selfkonfigurace;
@@ -163,20 +205,38 @@ db_migrate() {
   done
 }
 
+# Sdílený adresář ts/ (ústředna, ovládání a sidecar privátní sítě v něm mají
+# jedno místo). Práva mu zakládá VÝHRADNĚ tenhle entrypoint a nikdo jiný na
+# ně nesahá: setgid 2770 se skupinou ovládání, aby si tam obě strany mohly
+# zakládat soubory a číst je navzájem. Volá se dřív, než render() začne
+# čekat na adresu — sidecar do adresáře píše hned po startu a do té doby
+# by ovládání jeho soubory nepřečetlo.
+ts_dir_setup() {
+  mkdir -p "$DATA/ts" 2>/dev/null || true
+  chgrp 65534 "$DATA/ts" 2>/dev/null || true
+  chmod 2770 "$DATA/ts" 2>/dev/null || true
+  # Náprava po starších verzích: rekurzivní chown v render() tehdy soubory
+  # v ts/ přebral ústředně, takže si ovládání nepřečetlo ani to, co samo
+  # napsalo. Jen skupina a právo číst — zapisovat do souboru smí dál jen
+  # jeho jediný autor (a ten píše přes tmp + přejmenování, na což mu stačí
+  # právo k adresáři).
+  find "$DATA/ts" -maxdepth 1 -type f \
+    -exec chgrp 65534 {} + -exec chmod g+r {} + 2>/dev/null || true
+}
+
 common_setup() {
   # Čas v logu: ústředna čte /etc/localtime, proměnnou TZ ne.
   if [[ -n "${TZ:-}" && -e "/usr/share/zoneinfo/$TZ" ]]; then
     ln -sfn "/usr/share/zoneinfo/$TZ" /etc/localtime 2>/dev/null || true
     printf '%s\n' "$TZ" > /etc/timezone 2>/dev/null || true
   fi
-  mkdir -p "$DATA/queue" "$DATA/ts" "$DATA/webui"
+  mkdir -p "$DATA/queue" "$DATA/webui"
   # vlastníkem dat je ústředna
   chown asterisk "$DATA" "$DATA/queue" 2>/dev/null || true
   # setgid (2750/2770): soubory od ústředny dědí skupinu ovládání
   chgrp 65534 "$DATA" "$DATA/queue" 2>/dev/null || true
   chmod 2750 "$DATA" "$DATA/queue" 2>/dev/null || true
-  chgrp 65534 "$DATA/ts" 2>/dev/null || true
-  chmod 2770 "$DATA/ts" 2>/dev/null || true
+  ts_dir_setup
   # stav ovládání (tajemství 2FA, token brány) — zapisuje ho jen webui
   chgrp 65534 "$DATA/webui" 2>/dev/null || true
   chmod 2770 "$DATA/webui" 2>/dev/null || true
@@ -321,9 +381,14 @@ if [[ "${FIREWALL_INTERNAL:-0}" == "1" ]]; then
 fi
 
 legacy_data_migrate
+mkdir -p "$DATA" 2>/dev/null || true
+ts_dir_setup
 if [[ "${PHONE21_SELFCONFIG:-0}" == "1" ]]; then
   render
 fi
+# Bez selfkonfigurace renderuje konfiguraci configure.sh na hostiteli —
+# doménu tedy známe jen z prostředí (prázdná hodnota nechá soubor být).
+write_sip_domain "${SIP_DOMAIN:-}"
 common_setup
 db_migrate &
 [[ "${WATCHDOG_INTERNAL:-0}" == "1" ]] && watchdog_loop &

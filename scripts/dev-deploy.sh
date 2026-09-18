@@ -3,6 +3,7 @@
 # Phone21 — nasazení na vývojovou bránu (spouští se PŘÍMO na ní, v kořeni repa).
 #
 #   ./scripts/dev-deploy.sh [ref]     # default: origin/main
+#   P21_TS=1 ./scripts/dev-deploy.sh  # i s privátní sítí (overlay)
 #
 # Nahrazuje dřívější ruční kopírování souborů (tar-over-ssh), po kterém se
 # nedalo zjistit, co na bráně vlastně běží. Teď je zdrojem pravdy git:
@@ -33,10 +34,22 @@ echo "== render konfigurace (--force) =="
 ./configure.sh --force
 
 echo "== restart stacku =="
-# tailscale overlay se přidá, jen pokud existuje (dev bez tunelu ho nemá mít)
+# Overlay privátní sítě se přidá na výslovné přání: P21_TS=1.
+# Dřív se hádal podle runtime/ts-state (ten ale vzniká až prvním během
+# overlaye) a podle runtime/smsdata/ts/.enabled, který nikdo nezakládá —
+# na čisté bráně se tedy nezapnul nikdy. Kvůli už běžícím nasazením se
+# existující adresář stavu bere dál jako „zapnuto“.
 COMPOSE_FILES=(-f docker-compose.yml)
-[[ -f runtime/smsdata/ts/.enabled || -d runtime/ts-state ]] && \
+# bez proměnné rozhoduje běžící stav, s proměnnou rozhoduje proměnná
+# (P21_TS=0 tedy overlay vypne i na bráně, kde už jednou jel)
+[[ -n "${P21_TS:-}" || ! -d runtime/ts-state ]] || P21_TS=1
+P21_TS="${P21_TS:-0}"
+if [[ "$P21_TS" == "1" ]]; then
   COMPOSE_FILES+=(-f docker-compose.tailscale.yml)
+  echo "-- s privátní sítí (P21_TS=1)"
+else
+  echo "-- bez privátní sítě (zapneš ji P21_TS=1)"
+fi
 docker compose "${COMPOSE_FILES[@]}" up -d --force-recreate
 
 echo "== výsledek =="
