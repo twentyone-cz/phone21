@@ -12,7 +12,7 @@ services:
       APP_PORT: 8090
 
   pbx:
-    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.32@sha256:ab801a09537cca30feede4ee5cb9e0fc8ba9f919f6dfec317103dd5460218c63
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.33@sha256:691ed357bcf48074b6f6045b47d428f16bd7f68933369d4c986bd6c66c62d860
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
@@ -61,7 +61,7 @@ services:
     # chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/phone21-ui:0.9.32@sha256:9c9ce891f497a73c61f0faa59765173bfca11406513fff3e5c8a0766cc5da3d4
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.33@sha256:884883f7f2e748aa6c1e3c880d6cc3287128978d44e8d6d98abe79e298c08f6c
     restart: on-failure
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
@@ -685,7 +685,7 @@ services:
 
   # Kontakty a kalendář (server pro synchronizaci zařízení).
   dav:
-    image: ghcr.io/twentyone-cz/phone21-dav:0.9.32@sha256:dd69dc08791b5163f5b6e084915201f69559cc301fc8cc581fcac586c144ea54
+    image: ghcr.io/twentyone-cz/phone21-dav:0.9.33@sha256:77f6befa0267db2a2a721c362ee82aa6cabeb81ad88a1b4eba3485b69da88f3a
     restart: on-failure
     ports:
       - "5232:5232"
