@@ -35,6 +35,7 @@ TS_IP_FILE="$DATA/ts/ip"
 AST_PIDFILE=/run/asterisk-main.pid
 # značka, že ústřednu ukončila hlídka (ne pád) — čte ji smyčka SUPERVISE
 AST_RESTART_FLAG=/run/asterisk-restart.req
+rm -f "$AST_RESTART_FLAG" 2>/dev/null || true
 
 log() { echo "[entrypoint] $*"; }
 
@@ -53,7 +54,7 @@ ast_stop() {
   local pid waited=0
   pid="$(ast_pid)"
   [[ -n "$pid" ]] || { log "ústředna neběží — není co ukončovat"; return 0; }
-  : > "$AST_RESTART_FLAG" 2>/dev/null || true
+  printf '%s' "$pid" > "$AST_RESTART_FLAG" 2>/dev/null || true
   log "ukončuji ústřednu (PID $pid)"
   kill -TERM "$pid" 2>/dev/null || true
   while [[ -d "/proc/$pid" && $waited -lt 15 ]]; do sleep 1; waited=$((waited + 1)); done
@@ -267,6 +268,10 @@ common_setup() {
 watchdog_loop() {
   local fails=0 stuck=0 thr="${FAIL_THRESHOLD:-3}" interval="${WATCHDOG_INTERVAL:-30}"
   local out state
+  # pauza po marném restartu roste, dokud se modem nezotaví
+  local at_dev="${AT_DEVICE:-/dev/ttyUSB2}" nomodem=0
+  local pause_min=120 pause_max="${WATCHDOG_PAUSE_MAX:-600}" pause=120
+  [[ "$pause_max" =~ ^[0-9]+$ && $pause_max -ge $pause_min ]] || pause_max=600
   sleep 120  # po startu má modem čas na inicializaci
   while true; do
     # ústředna zaseknutá ve vypínání: CLI odpovídá, ale nic nedělá —
@@ -285,19 +290,28 @@ watchdog_loop() {
       continue
     fi
     stuck=0
+    # bez fyzického zařízení restart nepomůže: jen se čeká, až se objeví
+    if [[ ! -c "$at_dev" ]]; then
+      [[ $nomodem -eq 0 ]] && log "watchdog: modem není připojený ($at_dev) — nerestartuji"
+      nomodem=1; fails=0; pause=$pause_min
+      sleep "$interval"
+      continue
+    fi
+    if [[ $nomodem -eq 1 ]]; then log "watchdog: modem je zpátky ($at_dev)"; nomodem=0; fi
     state="$(asterisk -rx 'quectel show device state quectel0' 2>/dev/null | awk '/State/{print $3}')"
     if [[ -z "$state" || "$state" == "Not" ]]; then
       fails=$((fails + 1))
       log "watchdog: modem nezdravý ($fails/$thr)"
       if [[ $fails -ge $thr ]]; then
-        log "watchdog: restartuji ústřednu"
+        log "watchdog: restartuji ústřednu (další kontrola za ${pause} s)"
         ast_stop || true
         fails=0
-        sleep 120
+        sleep "$pause"
+        pause=$(( pause * 2 )); [[ $pause -gt $pause_max ]] && pause=$pause_max
         continue
       fi
     else
-      fails=0
+      fails=0; pause=$pause_min
     fi
     sleep "$interval"
   done
@@ -327,7 +341,7 @@ qmi_reset_count() {
   local now=$(date +%s) window=3600 line cnt=0 keep=""
   if [[ -f "$QMI_RESET_STATE" ]]; then
     while read -r line; do
-      [[ "$line" =~ ^[0-9]+$ ]] || continue
+      [[ "$line" =~ ^[1-9][0-9]*$ ]] || continue
       if (( line <= now && now - line < window )); then
         keep+="$line"$'\n'
         cnt=$((cnt + 1))
@@ -355,7 +369,9 @@ qmi_recover() {
   sleep 5
   qmi_ok && return 0
   local resets max="${QMI_RESET_MAX:-3}"
+  [[ "$max" =~ ^[0-9]+$ ]] || max=3
   resets=$(qmi_reset_count)
+  [[ "$resets" =~ ^[0-9]+$ ]] || resets=0
   if [[ $resets -ge $max ]]; then
     log "POZOR: reset modemu přeskočen — už $resets za poslední hodinu (strop $max)"
     return 1
@@ -522,7 +538,7 @@ if [[ "${SUPERVISE:-0}" == "1" ]]; then
     printf '%s' "$AST_MAIN" > "$AST_PIDFILE"
     wait "$AST_MAIN" || true
     rm -f "$AST_PIDFILE"
-    if [[ -e "$AST_RESTART_FLAG" ]]; then
+    if [[ "$(cat "$AST_RESTART_FLAG" 2>/dev/null)" == "$AST_MAIN" ]]; then
       # ukončila ji hlídka modemu, ne pád — plná rychlost startu
       rm -f "$AST_RESTART_FLAG"
       delay="$delay_min"; fast_fails=0

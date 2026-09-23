@@ -137,13 +137,11 @@ case "${1:-}" in
     ;;
   watch)
     log "failover watch: kontrola $CHECK_HOST po ${CHECK_INT}s, práh $FAIL_N"
-    # Kontejner se restartuje, ale trasy i spojení v modemu zůstávají:
-    # živé spojení se srovná na standby, jinak se uklidí obojí.
-    if [[ -f "$STATE" ]] && bearer_ok; then
+    # Kontejner se restartuje, trasy v jádře i spojení v modemu zůstávají.
+    # Zapomenutá ostrovní trasa se srovná na standby; stav spojení se nemaže,
+    # o mrtvý bearer se postará větev „spojení spadlo“ ve smyčce.
+    if ip route show default dev "$IF" 2>/dev/null | grep -q .; then
       wwan_route_set "$M_STANDBY" 2>/dev/null || true
-    else
-      wwan_route_flush
-      rm -f "$STATE"
     fi
     # Zapnuto/vypnuto se řídí za běhu z web UI (AstDB phone21/island_mode).
     island_on() {
