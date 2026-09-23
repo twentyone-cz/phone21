@@ -33,6 +33,8 @@ SECRETS="$DATA/secrets.env"
 TS_IP_FILE="$DATA/ts/ip"
 
 AST_PIDFILE=/run/asterisk-main.pid
+# značka, že ústřednu ukončila hlídka (ne pád) — čte ji smyčka SUPERVISE
+AST_RESTART_FLAG=/run/asterisk-restart.req
 
 log() { echo "[entrypoint] $*"; }
 
@@ -51,6 +53,7 @@ ast_stop() {
   local pid waited=0
   pid="$(ast_pid)"
   [[ -n "$pid" ]] || { log "ústředna neběží — není co ukončovat"; return 0; }
+  : > "$AST_RESTART_FLAG" 2>/dev/null || true
   log "ukončuji ústřednu (PID $pid)"
   kill -TERM "$pid" 2>/dev/null || true
   while [[ -d "/proc/$pid" && $waited -lt 15 ]]; do sleep 1; waited=$((waited + 1)); done
@@ -314,13 +317,51 @@ mm_release() {
 
 qmi_ok() { timeout 15 qmicli -d /dev/cdc-wdm0 --dms-get-model >/dev/null 2>&1; }
 
+# Strop na AT+CRESET: stav (časy posledních resetů) žije v souboru pod
+# $DATA, aby přežil i restart kontejneru.
+QMI_RESET_STATE="$DATA/qmi_resets"
+
+# Kolik resetů proběhlo za poslední hodinu — a při tom soubor pročistí
+# od starších záznamů.
+qmi_reset_count() {
+  local now=$(date +%s) window=3600 line cnt=0 keep=""
+  if [[ -f "$QMI_RESET_STATE" ]]; then
+    while read -r line; do
+      [[ "$line" =~ ^[0-9]+$ ]] || continue
+      if (( line <= now && now - line < window )); then
+        keep+="$line"$'\n'
+        cnt=$((cnt + 1))
+      fi
+    done < "$QMI_RESET_STATE"
+    if printf '%s' "$keep" > "$QMI_RESET_STATE.tmp" 2>/dev/null \
+       && mv "$QMI_RESET_STATE.tmp" "$QMI_RESET_STATE" 2>/dev/null; then
+      chgrp 65534 "$QMI_RESET_STATE" 2>/dev/null || true
+      chmod 0640 "$QMI_RESET_STATE" 2>/dev/null || true
+    fi
+  fi
+  printf '%s' "$cnt"
+}
+
+qmi_reset_mark() {
+  date +%s >> "$QMI_RESET_STATE" 2>/dev/null || true
+  chgrp 65534 "$QMI_RESET_STATE" 2>/dev/null || true
+  chmod 0640 "$QMI_RESET_STATE" 2>/dev/null || true
+}
+
 # Probrání zaseknutého datového rozhraní modemu (v krajním případě reset).
 qmi_recover() {
   qmi_ok && return 0
   mm_release
   sleep 5
   qmi_ok && return 0
+  local resets max="${QMI_RESET_MAX:-3}"
+  resets=$(qmi_reset_count)
+  if [[ $resets -ge $max ]]; then
+    log "POZOR: reset modemu přeskočen — už $resets za poslední hodinu (strop $max)"
+    return 1
+  fi
   log "QMI neodpovídá — resetuji modem"
+  qmi_reset_mark
   asterisk -rx "quectel cmd quectel0 AT+CRESET" >/dev/null 2>&1 || return 1
   for _ in $(seq 1 20); do
     sleep 10
@@ -410,8 +451,11 @@ island_default &
 lan_ip_loop() {
   local iface addr
   while true; do
-    iface=$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')
-    if [[ -n "$iface" && "$iface" != "tailscale0" ]]; then
+    # jen trasa s bránou a rozhraní podle klíčového slova "dev": trasa přes
+    # modem bránu nemá a nese adresu operátora, ne adresu v domácí síti
+    iface=$(ip route show default 2>/dev/null \
+            | awk '/^default via/{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')
+    if [[ -n "$iface" && "$iface" != "tailscale0" && ! -d "/sys/class/net/$iface/qmi" ]]; then
       addr=$(ip -4 -o addr show dev "$iface" 2>/dev/null \
              | awk '{split($4,a,"/"); print a[1]; exit}')
       if [[ -n "$addr" && "$addr" != 100.* && "$addr" != 127.* ]]; then
@@ -457,14 +501,46 @@ rotate_loop() {
 rotate_loop &
 
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
+  # Odstup mezi restarty roste exponenciálně (MIN → MAX). Po běhu delším
+  # než STABLE_S se vrátí na začátek — pád hned po startu je jiná věc
+  # než pád po týdnu provozu.
+  delay_min="${SUPERVISE_DELAY_MIN:-2}"
+  delay_max="${SUPERVISE_DELAY_MAX:-60}"
+  stable_s="${SUPERVISE_STABLE_S:-300}"
+  fast_fails_max="${SUPERVISE_FAST_FAILS:-10}"
+  # nesmyslná hodnota z prostředí by brzdu vypnula
+  [[ "$delay_min" =~ ^[0-9]+$ && $delay_min -ge 1 ]] || delay_min=2
+  [[ "$delay_max" =~ ^[0-9]+$ && $delay_max -ge $delay_min ]] || delay_max=$(( delay_min > 60 ? delay_min : 60 ))
+  [[ "$stable_s" =~ ^[0-9]+$ && $stable_s -ge 1 ]] || stable_s=300
+  [[ "$fast_fails_max" =~ ^[0-9]+$ && $fast_fails_max -ge 1 ]] || fast_fails_max=10
+  delay="$delay_min"
+  fast_fails=0
   while true; do
+    start_ts=$(date +%s)
     asterisk -f -U asterisk &
     AST_MAIN=$!
     printf '%s' "$AST_MAIN" > "$AST_PIDFILE"
     wait "$AST_MAIN" || true
     rm -f "$AST_PIDFILE"
-    log "ústředna skončila — restart za 2 s"
-    sleep 2
+    if [[ -e "$AST_RESTART_FLAG" ]]; then
+      # ukončila ji hlídka modemu, ne pád — plná rychlost startu
+      rm -f "$AST_RESTART_FLAG"
+      delay="$delay_min"; fast_fails=0
+    elif [[ $(( $(date +%s) - start_ts )) -ge $stable_s ]]; then
+      delay="$delay_min"; fast_fails=0
+    else
+      fast_fails=$((fast_fails + 1))
+    fi
+    # Strop rychlých pádů v řadě: dál se zkouší jen jednou za delší
+    # interval a loguje se jednou za pokus, ne každé kolo.
+    if [[ $fast_fails -ge $fast_fails_max ]]; then
+      log "ústředna padá opakovaně ($fast_fails rychlých pádů za sebou) — další pokus za ${stable_s} s"
+      sleep "$stable_s"
+      continue
+    fi
+    log "ústředna skončila — restart za ${delay} s"
+    sleep "$delay"
+    delay=$(( delay * 2 )); [[ $delay -gt $delay_max ]] && delay=$delay_max
   done
 else
   # exec nahradí tenhle shell, PID zůstává stejný

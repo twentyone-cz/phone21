@@ -35,6 +35,15 @@ services:
     container_name: phone21-net
     restart: unless-stopped
     network_mode: host
+    # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # deskriptory: služba privátní sítě drží hodně otevřených soketů
+    ulimits:
+      nofile: 524288
     cap_add:
       - NET_ADMIN
     devices:

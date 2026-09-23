@@ -7,6 +7,12 @@ version: "3.7"
 
 services:
   app_proxy:
+    # image dodává šablona Umbrelu, strop logu platí i pro něj
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       APP_HOST: jednadvacet-phone21_ui_1
       APP_PORT: 8090
@@ -15,6 +21,15 @@ services:
     image: ghcr.io/twentyone-cz/phone21-pbx:0.9.33@sha256:691ed357bcf48074b6f6045b47d428f16bd7f68933369d4c986bd6c66c62d860
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
+    # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # deskriptory: ústředna drží hodně otevřených soketů (hovory, AMI)
+    ulimits:
+      nofile: 524288
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
@@ -63,6 +78,12 @@ services:
       - "8091:8091"
     image: ghcr.io/twentyone-cz/phone21-ui:0.9.33@sha256:884883f7f2e748aa6c1e3c880d6cc3287128978d44e8d6d98abe79e298c08f6c
     restart: on-failure
+    # strop logu: max 10 MB × 3 soubory
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
       test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
@@ -106,6 +127,15 @@ services:
     image: tailscale/tailscale:v1.86.2@sha256:241d9518b7e0b6e533dbd0117fcea15acb4174249210837f52b71615949ce9d2
     restart: on-failure
     network_mode: host
+    # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # deskriptory: služba privátní sítě drží hodně otevřených soketů
+    ulimits:
+      nofile: 524288
     cap_add:
       - NET_ADMIN
     devices:
@@ -687,6 +717,12 @@ services:
   dav:
     image: ghcr.io/twentyone-cz/phone21-dav:0.9.33@sha256:77f6befa0267db2a2a721c362ee82aa6cabeb81ad88a1b4eba3485b69da88f3a
     restart: on-failure
+    # strop logu: max 10 MB × 3 soubory
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "5232:5232"
     healthcheck:

@@ -21,6 +21,15 @@ services:
     container_name: phone21-pbx
     network_mode: host          # široký rozsah UDP portů pro hovory
     restart: unless-stopped
+    # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # deskriptory: ústředna drží hodně otevřených soketů (hovory, AMI)
+    ulimits:
+      nofile: 524288
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
@@ -50,6 +59,12 @@ services:
     container_name: phone21-ui
     network_mode: host          # ovládání poslouchá na :8090 (jen domácí síť)
     restart: unless-stopped
+    # strop logu: max 10 MB × 3 soubory
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
       test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]

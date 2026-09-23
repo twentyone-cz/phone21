@@ -161,6 +161,72 @@ sys.exit(bad)
 PYEOF
 }
 step "compose soubory mají zdravou strukturu (bez dockeru)" compose_shape_check
+
+logging_cap_check() {
+  # Služba s vlastním image musí mít strop logu (bez rotace docker log umí
+  # zaplnit celý disk). app_proxy v umbrel compose image nemá (dodává ho
+  # šablona Umbrelu), a tak se do kontroly nepočítá. Bez pyyaml, čte se
+  # přímo tvar souboru jako v compose_shape_check výše.
+  python3 - \
+    docker-compose.yml \
+    docker-compose.standalone.yml \
+    docker-compose.tailscale.yml \
+    umbrel/jednadvacet-phone21/docker-compose.yml <<'PYEOF'
+import re
+import sys
+
+BLOCK = re.compile(r"[|>][+-]?[0-9]*\s*$")   # otevření víceřádkového textu
+
+bad = 0
+for path in sys.argv[1:]:
+    services = []   # [{"name":, "image": bool, "max_size": bool}]
+    cur = None       # rozepsaná služba
+    key = None       # aktuální klíč na úrovni služby (odsazení 4)
+    block_indent = None  # odsazení uzlu, který otevřel víceřádkový text
+    for raw in open(path, encoding="utf-8"):
+        line = raw.rstrip("\n")
+        indent = len(line) - len(line.lstrip(" "))
+        if block_indent is not None:
+            # obsah víceřádkového textu se nečte, je to shell, ne YAML
+            if not line.strip() or indent > block_indent:
+                continue
+            block_indent = None
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        stripped = line.strip()
+        head = re.match(r"^([A-Za-z0-9_.-]+):\s*(#.*)?$", stripped) if indent == 2 else None
+        if head:
+            cur = {"name": head.group(1), "image": False, "max_size": False}
+            services.append(cur)
+            key = None
+            continue
+        if cur is None:
+            continue
+        if indent == 4:
+            key = stripped.split(":", 1)[0]
+            if key in ("image", "build"):
+                # "build" počítá stejně jako "image": vlastní image i tehdy,
+                # když se staví lokálně a "image:" v souboru není vůbec
+                cur["image"] = True
+            if BLOCK.search(line):
+                block_indent = indent
+            continue
+        if key == "logging" and "max-size" in stripped:
+            cur["max_size"] = True
+        if BLOCK.search(line):
+            block_indent = indent
+
+    for svc in services:
+        if svc["image"] and not svc["max_size"]:
+            print("%s: služba %r má vlastní image, ale chybí logging.max-size"
+                  % (path, svc["name"]))
+            bad = 1
+
+sys.exit(bad)
+PYEOF
+}
+step "služby s vlastním image mají strop logu (logging.max-size)" logging_cap_check
+
 cstep "docker-compose.yml validní" \
   env AMI_PASSWORD=x WEBUI_PASSWORD=x SIP_USER=x SIP_DOMAIN=x \
     docker compose -f docker-compose.yml config -q

@@ -52,6 +52,17 @@ detect_if() {
 IF="${WWAN_IF:-$(detect_if || true)}"
 IF="${IF:-wwan0}"
 
+# `ip route replace` s jinou metrikou starou trasu nenahradí, ale přidá
+# druhou (metrika je součástí klíče) — proto před nastavením vždy smažeme
+# všechny výchozí trasy přes modem a až pak přidáme tu jednu správnou.
+wwan_route_flush() {
+  while ip route del default dev "$IF" 2>/dev/null; do :; done
+}
+wwan_route_set() {
+  wwan_route_flush
+  ip route add default dev "$IF" metric "$1"
+}
+
 wwan_start() {
   [[ -c "$DEV" ]] || { log "CHYBA: $DEV neexistuje"; return 1; }
   [[ -d "/sys/class/net/$IF" ]] || { log "CHYBA: rozhraní $IF neexistuje (qmi_wwan driver?)"; return 1; }
@@ -75,7 +86,7 @@ wwan_start() {
   bits=$(awk -F. '{n=0; for(i=1;i<=4;i++){x=$i; while(x>0){n+=x%2; x=int(x/2)}}; print n}' <<<"${pfx:-255.255.255.252}")
   ip link set "$IF" up
   ip addr replace "$addr/$bits" dev "$IF"
-  ip route replace default dev "$IF" metric "$M_STANDBY"
+  wwan_route_set "$M_STANDBY"
   log "spojení nahoře: $addr/$bits (APN $APN), default route metric $M_STANDBY"
 }
 
@@ -87,7 +98,7 @@ wwan_stop() {
       && qmi --wds-stop-network="$HANDLE" --client-cid="$CID" >/dev/null 2>&1
     rm -f "$STATE"
   fi
-  ip route del default dev "$IF" 2>/dev/null
+  wwan_route_flush
   ip addr flush dev "$IF" 2>/dev/null
   ip link set "$IF" down 2>/dev/null
   log "spojení položeno"
@@ -99,7 +110,16 @@ wwan_up() { [[ -f "$STATE" ]] && ip route show default dev "$IF" 2>/dev/null | g
 bearer_ok() { qmi --wds-get-packet-service-status 2>/dev/null | grep -q "'connected'"; }
 
 primary_if() {
-  ip route show default | awk -v w="$IF" '$5 != w {print $5; exit}'
+  # Podle klíčového slova `dev`, ne pevné pozice pole — u trasy typu
+  # "default dev wwan0 scope link metric 50" by $5 vrátilo "link".
+  # Vyloučit rozhraní modemu i tailscale0 (VPN, ne uplink).
+  ip route show default | awk -v w="$IF" '
+    {
+      d = ""
+      for (i = 1; i <= NF; i++) if ($i == "dev") d = $(i + 1)
+      if (d != "" && d != w && d != "tailscale0") { print d; exit }
+    }
+  '
 }
 
 primary_ok() {
@@ -117,6 +137,14 @@ case "${1:-}" in
     ;;
   watch)
     log "failover watch: kontrola $CHECK_HOST po ${CHECK_INT}s, práh $FAIL_N"
+    # Kontejner se restartuje, ale trasy i spojení v modemu zůstávají:
+    # živé spojení se srovná na standby, jinak se uklidí obojí.
+    if [[ -f "$STATE" ]] && bearer_ok; then
+      wwan_route_set "$M_STANDBY" 2>/dev/null || true
+    else
+      wwan_route_flush
+      rm -f "$STATE"
+    fi
     # Zapnuto/vypnuto se řídí za běhu z web UI (AstDB phone21/island_mode).
     island_on() {
       asterisk -rx "database get phone21 island_mode" 2>/dev/null | grep -q "Value: on"
@@ -141,7 +169,7 @@ case "${1:-}" in
       if ! island_on; then
         if [[ $active -eq 1 ]]; then
           log "ostrovní režim vypnut v nastavení — vracím modem do standby"
-          ip route replace default dev "$IF" metric "$M_STANDBY" 2>/dev/null
+          wwan_route_set "$M_STANDBY" 2>/dev/null
           active=0
         fi
         fails=0
@@ -159,7 +187,7 @@ case "${1:-}" in
         fails=0
         if [[ $active -eq 1 ]]; then
           log "primární konektivita zpět — vracím modem do standby"
-          ip route replace default dev "$IF" metric "$M_STANDBY" 2>/dev/null
+          wwan_route_set "$M_STANDBY" 2>/dev/null
           active=0
         fi
       elif [[ $active -eq 1 ]] && ! bearer_ok; then
@@ -168,7 +196,7 @@ case "${1:-}" in
         log "ostrovní spojení spadlo — obnovuji"
         wwan_stop >/dev/null 2>&1
         if wwan_start; then
-          ip route replace default dev "$IF" metric "$M_ACTIVE" 2>/dev/null
+          wwan_route_set "$M_ACTIVE" 2>/dev/null
         else
           active=0
         fi
@@ -176,9 +204,11 @@ case "${1:-}" in
         fails=$((fails + 1))
         if [[ $fails -ge $FAIL_N && $active -eq 0 ]]; then
           log "primární konektivita mrtvá ($fails×) — OSTROVNÍ REŽIM"
-          wwan_up || wwan_start
-          ip route replace default dev "$IF" metric "$M_ACTIVE" 2>/dev/null
-          active=1
+          if { wwan_up || wwan_start; } && wwan_route_set "$M_ACTIVE" 2>/dev/null; then
+            active=1
+          else
+            log "ostrovní spojení se nepodařilo postavit — zkusím znovu"
+          fi
         fi
       fi
       sleep "$CHECK_INT"

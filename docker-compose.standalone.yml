@@ -25,6 +25,15 @@ services:
     container_name: phone21-pbx
     restart: unless-stopped
     network_mode: host
+    # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # deskriptory: ústředna drží hodně otevřených soketů (hovory, AMI)
+    ulimits:
+      nofile: 524288
     # zdraví = ústředna odpovídá na dotaz (diagnostika pro docker ps)
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show uptime' | grep -q 'System uptime'"]
@@ -71,6 +80,12 @@ services:
     build: ./webui
     container_name: phone21-ui
     restart: unless-stopped
+    # strop logu: max 10 MB × 3 soubory
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # zdraví = přihlašovací stránka odpovídá
     healthcheck:
       test: ["CMD", "python3", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/login' % os.environ.get('WEBUI_PORT','8090'), timeout=5)"]
@@ -116,6 +131,15 @@ services:
     container_name: phone21-net
     restart: unless-stopped
     network_mode: host
+    # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # deskriptory: služba privátní sítě drží hodně otevřených soketů
+    ulimits:
+      nofile: 524288
     cap_add:
       - NET_ADMIN
     devices:
@@ -697,6 +721,12 @@ services:
     build: ./dav
     container_name: phone21-dav
     restart: on-failure
+    # strop logu: max 10 MB × 3 soubory
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "5232:5232"
     environment:
