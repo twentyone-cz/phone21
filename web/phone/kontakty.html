@@ -98,7 +98,7 @@ v účtu Google, exportuj je rovnou z Googlu.</p>
   <li>Nové záznamy ukládej do miniserveru, ne do „Telefon / Zařízení“:
   v Kontaktech nastav <i>Výchozí účet pro nové kontakty</i> na účet
   z DAVx⁵, v Phone21 (Konexe → Kontakty) zvol adresář z miniserveru.
-  Kalendářová aplikace na telefonech bez služeb Googlu obvykle chybí —
+  Kalendářová aplikace na telefonech bez služeb Googlu (GrapheneOS) obvykle chybí —
   nainstaluj Fossify Calendar nebo Etar a nové události zakládej do
   kalendáře z miniserveru.</li>
 </ol>
@@ -115,7 +115,7 @@ jsou <code>…:5232/spolecne/kontakty/</code> a
 <p>Každý profil a každé zařízení dostane v ovládání <b>vlastní
 přihlášení</b> a vlastní DAVx⁵. Obsah je všude stejný.</p>
 <ul>
-  <li><b>Profily telefonu</b> o sobě navzájem nevědí, takže DAVx⁵ nastav
+  <li><b>Profily telefonu</b> (třeba v GrapheneOS) o sobě navzájem nevědí, takže DAVx⁵ nastav
   v každém zvlášť. Hovory a zprávy chodí jen do profilu s aplikací Phone21
   a jména volajících bere z kontaktů téhož profilu.</li>
   <li>Privátní síť běží jen v profilu s aplikací Phone21. Ostatní profily
@@ -139,8 +139,8 @@ přihlášení</b> a vlastní DAVx⁵. Obsah je všude stejný.</p>
 </ul>
 
 <h2>5. Kalendář Google bez služeb Google Play</h2>
-<p>Aplikace Google Kalendář bez služeb Google Play nefunguje. Kalendář
-v Googlu ale můžeš používat dál i bez nich:</p>
+<p>Aplikace Google Kalendář bez služeb Google Play nefunguje, typicky na
+GrapheneOS. Kalendář v Googlu ale můžeš používat dál i bez nich:</p>
 <ol class="steps">
   <li>V DAVx⁵ přidej další účet a zvol přihlášení přes <b>Google</b>.
   Přihlášení proběhne v prohlížeči a DAVx⁵ dostane jen přístup ke kalendáři
@@ -163,9 +163,9 @@ celý</b>: události, místa, účastníky i časy.</p>
   Google. Tajná adresa ale funguje jako heslo — kdo ji zná, kalendář
   přečte.</li>
 </ul>
-<p class="honest">Kdybys aplikaci Google Kalendář přece jen chtěl: některé
-systémy umí spustit služby Google Play izolovaně, jako běžnou aplikaci bez
-zvláštních oprávnění. Dej je pak do samostatného profilu telefonu jen pro
+<p class="honest">Kdybys aplikaci Google Kalendář přece jen chtěl: GrapheneOS
+umí spustit služby Google Play izolovaně (sandboxed Google Play), jako běžnou
+aplikaci bez zvláštních oprávnění. Dej je pak do samostatného profilu telefonu jen pro
 Google. Bezpečnosti to pomůže, soukromí ne — služby Play v tom profilu
 Googlu dál posílají data o zařízení a kalendář Google vidí celý.</p>
 
