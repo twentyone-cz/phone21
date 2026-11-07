@@ -236,6 +236,38 @@ a kontakt se dostane na všechna zařízení. Důsledky:
   jednorázově přenesly do adresáře telefonu (dělá se samo, nic nenastavuj),
 - smazání kontaktu v aplikaci ho smaže i z adresáře telefonu.
 
+### 1H. Kalendář Google bez služeb Google Play
+
+Aplikace Google Kalendář bez služeb Google Play nefunguje. Kalendář v Googlu
+ale jde používat dál i bez nich:
+
+1. V DAVx⁵ přidej další účet a zvol přihlášení přes **Google**. Přihlášení
+   proběhne v prohlížeči a DAVx⁵ dostane jen přístup ke kalendáři
+   a kontaktům, ne heslo k účtu.
+2. Zapni kalendáře, které chceš mít v telefonu. Synchronizují se oběma směry
+   a ukáže je tatáž kalendářová aplikace jako kalendář z miniserveru —
+   u nové události vybereš, kam patří.
+
+Telefon pak s Googlem mluví jen kvůli kalendáři, bez telemetrie služeb Play
+a bez reklamního identifikátoru. **Obsah kalendáře ale Google vidí dál
+celý**: události, místa, účastníky i časy.
+
+Rozumný kompromis:
+
+- osobní kalendář přesuň na miniserver (1A);
+- v Googlu nech jen kalendáře sdílené s ostatními (práce, rodina)
+  a synchronizuj je přes DAVx⁵;
+- kalendář, do kterého jen koukáš (cizí sdílený, svátky), odebírej jen ke
+  čtení aplikací **ICSx⁵** (F-Droid) přes tajnou adresu iCal z nastavení
+  Google Kalendáře. Do telefonu se pak nepřihlašuje žádný účet Google. Tajná
+  adresa ale funguje jako heslo — kdo ji zná, kalendář přečte.
+
+Kdybys aplikaci Google Kalendář přece jen chtěl: některé systémy umí spustit
+služby Google Play izolovaně, jako běžnou aplikaci bez zvláštních oprávnění.
+Dej je pak do samostatného profilu telefonu jen pro Google. Bezpečnosti to
+pomůže, soukromí ne — služby Play v tom profilu Googlu dál posílají data
+o zařízení a kalendář Google vidí celý.
+
 ### Gotchas
 
 - **Diakritika:** export z Googlu i z iCloudu je UTF-8 vCard 3.0 — čeština OK.
