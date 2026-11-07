@@ -5,5 +5,7 @@ RUN pip install --no-cache-dir radicale==3.7.8 bcrypt==5.0.0
 COPY config /etc/radicale/config
 COPY rights /etc/radicale/rights
 COPY entrypoint.py /opt/phone21-dav/entrypoint.py
+COPY phone21_auth.py /opt/phone21-dav/phone21_auth.py
+ENV PYTHONPATH=/opt/phone21-dav
 EXPOSE 5232
 CMD ["python3", "/opt/phone21-dav/entrypoint.py"]

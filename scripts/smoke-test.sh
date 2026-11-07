@@ -654,6 +654,20 @@ ics = ("BEGIN:VCALENDAR\nVERSION:2.0\n"
        "END:VCALENDAR\n")
 items = mod.split_ics(ics)
 assert len(items) == 1, items
+# připomínka uvnitř události (export Googlu) zůstává v ní, UID je události
+ics = ("BEGIN:VCALENDAR\nVERSION:2.0\n"
+       "BEGIN:VEVENT\nUID:ev\nSUMMARY:a\n"
+       "BEGIN:VALARM\nUID:al\nACTION:DISPLAY\nTRIGGER:-PT30M\nEND:VALARM\n"
+       "END:VEVENT\nBEGIN:VEVENT\nUID:ev2\nSUMMARY:b\nEND:VEVENT\n"
+       "END:VCALENDAR\n")
+items = mod.split_ics(ics)
+assert [u for u, _ in items] == ["ev", "ev2"], items
+assert "BEGIN:VEVENT" in items[0][1] and "BEGIN:VALARM" in items[0][1], items
+# složený řádek, jehož pokračování vypadá jako konec události, ji neutne
+ics = ("BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:f1\nDESCRIPTION:a\n"
+       " END:VEVENT\nSUMMARY:cela\nEND:VEVENT\nEND:VCALENDAR\n")
+items = mod.split_ics(ics)
+assert [u for u, _ in items] == ["f1"] and "SUMMARY:cela" in items[0][1], items
 assert mod.DAV_USER_RE.match("petr") and not mod.DAV_USER_RE.match("_x")
 assert not mod.DAV_USER_RE.match("Petr Novak")
 # vizitka bez jména musí jméno dostat, jinak ji úložiště odmítne (400)
@@ -666,6 +680,99 @@ assert fn_of("BEGIN:VCARD\nVERSION:3.0\nFN:Beze zmeny\nTEL:+420333\nEND:VCARD") 
 PY
 }
 step "dělení kontaktů a kalendáře funguje" dav_split_check
+
+# Zařízení se přihlašují vlastním heslem a všechna vidí společný adresář.
+dav_shared_check() {
+  docker cp webui/app.py "$DAV":/tmp/wapp.py >/dev/null || return 1
+  docker exec -u 65534 -e DAV_URL=http://127.0.0.1:5232 -e DAV_DIR=/data/config \
+    -e PHONE21_DATA=/tmp/p21 -e WEBUI_STATE=/tmp/p21/webui -i "$DAV" python3 - <<'PY'
+import base64, sys, urllib.request, urllib.error
+sys.path.insert(0, "/tmp")
+import wapp
+def req(method, path, who, body=None, headers=None):
+    r = urllib.request.Request("http://127.0.0.1:5232" + path, data=body, method=method)
+    r.add_header("Authorization", "Basic " + base64.b64encode(("%s:%s" % who).encode()).decode())
+    for k, v in (headers or {}).items():
+        r.add_header(k, v)
+    try:
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+p1, err = wapp.dav_user_add("telefon")
+assert p1 and not err, err
+p2, err = wapp.dav_user_add("tablet")
+assert p2 and not err, err
+one, two = ("telefon", p1), ("tablet", p2)
+card = b"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:k1\r\nFN:Petr\r\nEND:VCARD\r\n"
+st, _ = req("PUT", "/spolecne/kontakty/k1.vcf", one, card, {"Content-Type": "text/vcard"})
+assert st in (201, 204), st
+st, body = req("GET", "/spolecne/kontakty/k1.vcf", two)
+assert st == 200 and b"Petr" in body, (st, body[:200])
+st, body = req("PROPFIND", "/", two, b'<?xml version="1.0"?><propfind xmlns="DAV:"><prop><current-user-principal/></prop></propfind>', {"Depth": "0"})
+assert st == 207 and b"/spolecne/" in body, (st, body[:300])
+# smazané zařízení se už nepřihlásí, ostatní běží dál
+assert wapp.dav_user_del("tablet") == ""
+st, _ = req("GET", "/spolecne/kontakty/k1.vcf", two)
+assert st == 401, st
+st, _ = req("GET", "/spolecne/kontakty/k1.vcf", one)
+assert st == 200, st
+# zařízení nesmí smazat ani přepsat celý společný adresář
+st, _ = req("DELETE", "/spolecne/kontakty/", one)
+assert st in (401, 403), st
+st, _ = req("PUT", "/spolecne/kontakty/", one, card, {"Content-Type": "text/vcard"})
+assert st in (401, 403, 405, 409), st
+st, _ = req("GET", "/spolecne/kontakty/k1.vcf", one)
+assert st == 200, st
+# událost s kredity projde validací úložiště a nese dvě připomínky
+ics = wapp.credit_event_ics(2000000000)
+assert ics.count("BEGIN:VALARM") == 2
+st, _ = req("PUT", "/spolecne/kalendar/%s.ics" % wapp.CREDIT_UID, one, ics.encode(), {"Content-Type": "text/calendar"})
+assert st in (201, 204), st
+PY
+}
+dstep "zařízení sdílí společný adresář, smazané se nepřihlásí" dav_shared_check
+
+# Dřívější účty (každý s vlastním adresářem) se jednorázově přelijí do společného.
+dav_migrate_check() {
+  docker exec -u 65534 -e DAV_URL=http://127.0.0.1:5232 -e DAV_DIR=/data/config \
+    -e PHONE21_DATA=/tmp/p21 -e WEBUI_STATE=/tmp/p21/webui -i "$DAV" python3 - <<'PY'
+import sys
+sys.path.insert(0, "/tmp")
+import wapp
+users = wapp.dav_read_users()
+users["stary"] = wapp.dav_hash("heslo-stareho")
+wapp.dav_write_users(users)
+for path, body in (("/stary/", None), ("/stary/kontakty/", wapp.MKCOL_BOOK),
+                   ("/stary/kalendar/", wapp.MKCOL_CAL)):
+    st, _ = wapp.dav_request("MKCOL", path, body.encode() if body else None,
+                             "application/xml; charset=utf-8" if body else None)
+    assert st in (201, 405), (path, st)
+st, _ = wapp.dav_request("PUT", "/stary/kontakty/k2.vcf",
+                         b"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:k2\r\nFN:Jana\r\nEND:VCARD\r\n",
+                         "text/vcard")
+assert st in (201, 204), st
+# tentýž kontakt jako ve společném (UID k1), ale pod jiným názvem souboru
+st, _ = wapp.dav_request("PUT", "/stary/kontakty/jine-jmeno.vcf",
+                         b"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:k1\r\nFN:Petr\r\nEND:VCARD\r\n",
+                         "text/vcard")
+assert st in (201, 204), st
+st, _ = wapp.dav_request("PUT", "/stary/kalendar/e1.ics",
+                         b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:x\r\nBEGIN:VEVENT\r\nUID:e1\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20260102T100000Z\r\nSUMMARY:s\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+                         "text/calendar")
+assert st in (201, 204), st
+wapp.dav_migrate_shared()
+assert wapp._dav_migration["failed"] == 0, wapp._dav_migration
+assert "stary" in wapp._dav_migration["names"], wapp._dav_migration
+for path in ("/spolecne/kontakty/k2.vcf", "/spolecne/kalendar/e1.ics", "/stary/kontakty/k2.vcf"):
+    st, _ = wapp.dav_request("GET", path)
+    assert st == 200, (path, st)
+# druhý běh nic neopakuje
+wapp.dav_migrate_shared()
+assert wapp._dav_migration["names"] == [], wapp._dav_migration
+PY
+}
+dstep "dřívější účty se přelijí do společného adresáře" dav_migrate_check
 
 # --- 8. veřejné texty bez názvů technologií --------------------------------
 # Samostatná slova v lidsky psaném textu; identifikátory (phone21,
@@ -742,7 +849,7 @@ step "umbrel-app.yml bez názvů technologií" \
   tech_check umbrel/jednadvacet-phone21/umbrel-app.yml
 step "README a veřejné návody bez názvů technologií" \
   tech_check README.md docs/faq.md docs/telefon.md \
-    web/phone/index.html web/phone/instalace.html
+    web/phone/index.html web/phone/instalace.html web/phone/kontakty.html
 step "umbrel compose bez názvů technologií v textu" \
   tech_check umbrel/jednadvacet-phone21/docker-compose.yml
 webui_text_check() {

@@ -10,7 +10,7 @@ user: .+
 collection:
 permissions: R
 
-# Vlastní adresář uživatele.
+# Vlastní adresář uživatele (zařízení se přihlašují jako společný uživatel).
 [principal]
 user: .+
 collection: {user}

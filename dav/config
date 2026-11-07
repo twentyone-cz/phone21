@@ -3,16 +3,20 @@ hosts = 0.0.0.0:5232
 max_connections = 20
 
 [auth]
-type = htpasswd
+# htpasswd s mapováním zařízení na společný adresář (phone21_auth.py)
+type = phone21_auth
 htpasswd_filename = /data/config/users
 htpasswd_encryption = bcrypt
-cache_logins = True
+cache_logins = False
 lc_username = True
 delay = 1
 realm = Phone21
 
 [rights]
 type = from_file
+# celý společný adresář ani kalendář nesmí zařízení smazat ani přepsat
+permit_delete_collection = False
+permit_overwrite_collection = False
 file = /etc/radicale/rights
 
 [storage]

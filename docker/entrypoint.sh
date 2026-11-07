@@ -397,6 +397,41 @@ volte_probe() {
   esac
 }
 
+# Volba sítě modemu z ovládání (AstDB phone21/rat_mode): secure = jen 4G,
+# connect = 4G, 3G i 2G. Bez volby se modem nechává, jak je; během hovoru se
+# nepřepíná a nepovedený pokus se opakuje nejdřív za 10 minut.
+rat_last_try=0
+rat_apply() {
+  local want out cur state modes now
+  out="$(timeout 15 qmicli -d /dev/cdc-wdm0 --nas-get-system-selection-preference 2>/dev/null)" || out=""
+  cur="$(printf '%s\n' "$out" | sed -n "s/.*Mode preference: '\(.*\)'.*/\1/p" | head -1)"
+  case "$cur" in
+    "") state=unknown ;;
+    lte) state=lte ;;
+    *gsm*umts*lte*|*gsm*lte*umts*|*umts*gsm*lte*) state=all ;;
+    *) state=other ;;
+  esac
+  want="$(asterisk -rx 'database get phone21 rat_mode' 2>/dev/null | awk '/^Value:/{print $2}')"
+  case "$want" in
+    secure) [[ "$state" == lte ]] || modes=lte ;;
+    connect) [[ "$state" == all ]] || modes='gsm|umts|lte' ;;
+  esac
+  now="$(date +%s)"
+  if [[ -n "${modes:-}" && "$state" != unknown && $((now - rat_last_try)) -ge 600 ]] \
+      && ! asterisk -rx 'core show channels concise' 2>/dev/null | grep -q '^Quectel/'; then
+    rat_last_try=$now
+    log "síť modemu: nastavuji $want"
+    if timeout 15 qmicli -d /dev/cdc-wdm0 --nas-set-system-selection-preference="$modes" >/dev/null 2>&1; then
+      [[ "$want" == secure ]] && state=lte || state=all
+    else
+      log "POZOR: síť modemu se nepodařilo nastavit (zkusím znovu za 10 minut)"
+    fi
+  fi
+  printf '%s\n' "$state" > "$DATA/rat.tmp" 2>/dev/null \
+    && mv "$DATA/rat.tmp" "$DATA/rat" 2>/dev/null
+  chmod 0644 "$DATA/rat" 2>/dev/null || true
+}
+
 mbn_loop() {
   sleep 30              # Asterisk musí být nahoře (reset jde přes CLI)
   mm_release
@@ -419,10 +454,14 @@ mbn_loop() {
         MBN_PROFILE="${MBN_PROFILE:-auto}" MBN_MAP="${MBN_MAP:-}" \
           /opt/phone21/scripts/mbn-profile.sh auto || true
       fi
+      rat_apply
       v="$(volte_probe || echo unknown)"
       printf '%s\n' "$v" > "$DATA/volte.tmp" 2>/dev/null \
         && mv "$DATA/volte.tmp" "$DATA/volte" 2>/dev/null
       chmod 0644 "$DATA/volte" 2>/dev/null || true
+    elif [[ -f "$DATA/rat" ]]; then
+      printf 'unknown\n' > "$DATA/rat.tmp" 2>/dev/null \
+        && mv "$DATA/rat.tmp" "$DATA/rat" 2>/dev/null
     fi
     n=$((n + 1))
     sleep 60

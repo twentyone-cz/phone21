@@ -52,6 +52,8 @@ DAV_PORT = os.environ.get("DAV_PORT", "5232")
 DAV_ADMIN = "_phone21"
 DAV_BOOK = "kontakty"
 DAV_CAL = "kalendar"
+# společný adresář a kalendář — zařízení se do úložiště hlásí jako on
+DAV_SHARED = "spolecne"
 DAV_USER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 DAV_IMPORT_MAX = 20 * 1024 * 1024
 try:
@@ -1384,6 +1386,59 @@ def get_island_mode():
     return "off"
 
 
+RAT_MODES = ("connect", "secure")
+
+
+def get_rat_mode():
+    """Volba sítě modemu: connect = 4G, 3G i 2G (výchozí), secure = jen 4G."""
+    out = cli("database get phone21 rat_mode")
+    for ln in out.splitlines():
+        if ln.startswith("Value:"):
+            val = ln.split(":", 1)[1].strip()
+            if val in RAT_MODES:
+                return val
+    return "connect"
+
+
+def rat_state():
+    """Co modem právě má: lte (jen 4G) / all (4G, 3G, 2G) / other / unknown."""
+    try:
+        val = open(os.path.join(DATA_DIR, "rat")).read().strip()
+    except OSError:
+        return "unknown"
+    return val if val in ("lte", "all", "other") else "unknown"
+
+
+def rat_block():
+    """Volba sítě modemu včetně upozornění, když hlas po 4G nejede. Prázdné,
+    když hlídka modemu neběží (stav nikdo nezapisuje, volba by nic nedělala)."""
+    if not os.path.exists(os.path.join(DATA_DIR, "rat")):
+        return ""
+    mode = get_rat_mode()
+    state = rat_state()
+    now = {"lte": "teď jen 4G", "all": "teď 4G, 3G i 2G",
+           "other": "teď jiné nastavení modemu"}.get(state, "stav modemu zatím neznámý")
+    warn = ""
+    if mode == "secure" and volte_state() != "registered":
+        warn = ('<p class="warn">Modem teď nemá hlas po datové síti. V režimu '
+                "jen 4G proto hovory nefungují — zprávy ano. Buď počkej, až "
+                "se hlas přihlásí, nebo přepni na maximální konektivitu.</p>")
+    return (
+        '<form method="post" action="%s">%s%s'
+        '<button style="margin-top:.5rem">Uložit</button></form>'
+        '<p class="muted small">%s · změna se projeví do minuty, modem se při ní '
+        "na chvíli odhlásí ze sítě.</p>%s" % (
+            u("/rat-mode"),
+            _choice("rat", "connect", mode, "Maximální konektivita (doporučeno)",
+                    "Modem použije 4G, a kde není, i 3G nebo 2G. Hovory "
+                    "a zprávy projdou skoro všude."),
+            _choice("rat", "secure", mode, "Maximální bezpečnost — jen 4G",
+                    "Modem nikdy nesestoupí na 2G ani 3G, takže ho falešný "
+                    "vysílač nestáhne na slabě šifrované 2G. Hovory jdou jen "
+                    "přes hlas po 4G; kde 4G není, nebudeš dosažitelný."),
+            esc(now), warn))
+
+
 def volte_state():
     """registered / not-registered / unknown — stav plní kontejner ústředny."""
     try:
@@ -1578,13 +1633,13 @@ def dav_ensure_collections(user):
 def dav_user_add(name):
     users = dav_read_users()
     if name in users:
-        return None, "[OVL-E25] Účet %s už existuje." % esc(name)
+        return None, "[OVL-E25] Zařízení %s už existuje." % esc(name)
+    ok, detail = dav_ensure_collections(DAV_SHARED)
+    if not ok:
+        return None, "[OVL-E26] Úložiště zařízení nepřijalo: %s" % esc(detail)
     password = dav_new_password()
     users[name] = dav_hash(password)
     dav_write_users(users)
-    ok, detail = dav_ensure_collections(name)
-    if not ok:
-        return None, "[OVL-E26] Úložiště účet nepřijalo: %s" % esc(detail)
     audit("dav user ADD %s" % name)
     return password, ""
 
@@ -1592,7 +1647,7 @@ def dav_user_add(name):
 def dav_user_reset(name):
     users = dav_read_users()
     if name not in users:
-        return None, "[OVL-E25] Účet %s neexistuje." % esc(name)
+        return None, "[OVL-E25] Zařízení %s neexistuje." % esc(name)
     password = dav_new_password()
     users[name] = dav_hash(password)
     dav_write_users(users)
@@ -1600,16 +1655,90 @@ def dav_user_reset(name):
     return password, ""
 
 
-def dav_user_del(name, drop_data=False):
+def dav_user_del(name):
+    """Smaže jen přihlášení zařízení — společná data zůstávají."""
     users = dav_read_users()
     if name not in users:
-        return "[OVL-E25] Účet %s neexistuje." % esc(name)
+        return "[OVL-E25] Zařízení %s neexistuje." % esc(name)
     del users[name]
     dav_write_users(users)
-    if drop_data:
-        dav_request("DELETE", "/%s/" % name)
-    audit("dav user DEL %s data=%s" % (name, drop_data))
+    audit("dav user DEL %s" % name)
     return ""
+
+
+_dav_migration = {"done": False, "copied": 0, "failed": 0, "names": []}
+
+
+def dav_migrated_path():
+    return os.path.join(DAV_DIR, "migrated-shared")
+
+
+def dav_list_items(path):
+    """Položky kolekce (cesty) přes PROPFIND; None = kolekce není."""
+    status, data = dav_request("PROPFIND", path, None, None, {"Depth": "1"})
+    if status != 207:
+        return None
+    hrefs = re.findall(rb"<(?:[A-Za-z0-9]+:)?href>([^<]+)</(?:[A-Za-z0-9]+:)?href>", data)
+    out = []
+    for href in hrefs:
+        href = href.decode("utf-8", "replace")
+        if not href.endswith("/"):
+            out.append(href)
+    return out
+
+
+def dav_migrate_shared():
+    """Jednorázově přelije adresáře a kalendáře starých účtů (každý měl
+    vlastní) do společného. Původní data zůstávají na místě nedotčená;
+    položka, která už ve společném je, se přeskočí."""
+    for _ in range(60):
+        status, _ = dav_request("PROPFIND", "/", None, None, {"Depth": "0"})
+        if status:
+            break
+        time.sleep(5)
+    else:
+        return
+    ok, detail = dav_ensure_collections(DAV_SHARED)
+    if not ok:
+        audit("dav migrace: společné kolekce nevznikly: %s" % detail)
+        return
+    try:
+        done = set(open(dav_migrated_path()).read().split())
+    except OSError:
+        done = set()
+    names = [n for n in sorted(dav_read_users())
+             if n not in (DAV_ADMIN, DAV_SHARED) and n not in done]
+    copied = failed = 0
+    moved = []
+    for name in names:
+        bad = 0
+        for coll, ctype in ((DAV_BOOK, "text/vcard; charset=utf-8"),
+                            (DAV_CAL, "text/calendar; charset=utf-8")):
+            items = dav_list_items("/%s/%s/" % (name, coll))
+            for href in items or []:
+                status, body = dav_request("GET", href)
+                if status != 200:
+                    bad += 1
+                    continue
+                target = "/%s/%s/%s" % (DAV_SHARED, coll, href.rsplit("/", 1)[1])
+                status, _ = dav_request("PUT", target, body, ctype,
+                                        {"If-None-Match": "*"})
+                if status in (201, 204):
+                    copied += 1
+                elif status not in (409, 412):
+                    # 412 = stejný název, 409 = stejné UID pod jiným názvem
+                    bad += 1
+        failed += bad
+        if not bad:
+            done.add(name)
+            moved.append(name)
+    if moved:
+        write_state(dav_migrated_path(), "".join("%s\n" % n for n in sorted(done)))
+    with _dav_lock:
+        _dav_migration.update(done=True, copied=copied, failed=failed, names=moved)
+    if names:
+        audit("dav migrace do společného: účty=%s zkopírováno=%d chyb=%d"
+              % (",".join(names), copied, failed))
 
 
 def _vcard_unescape_qp(value, params):
@@ -1693,19 +1822,21 @@ def split_vcards(text):
 
 
 def split_ics(text):
-    """Rozdělí .ics na položky podle UID (opakování sdílí UID)."""
+    """Rozdělí .ics na položky podle UID (opakování sdílí UID). Vnořené
+    komponenty (připomínky) zůstávají uvnitř své události."""
     lines = text.splitlines()
     header = []
     timezones = []
     comps = {}
     order = []
     block = None
-    kind = ""
+    depth = 0
     in_tz = False
     tz_block = []
     for line in lines:
-        upper = line.strip().upper()
-        if upper.startswith("BEGIN:VTIMEZONE"):
+        # pokračování složeného řádku (mezera, tabulátor) není vlastnost
+        upper = "" if line[:1] in (" ", "\t") else line.strip().upper()
+        if block is None and upper.startswith("BEGIN:VTIMEZONE"):
             in_tz = True
             tz_block = [line]
             continue
@@ -1715,25 +1846,39 @@ def split_ics(text):
                 timezones.append("\r\n".join(tz_block))
                 in_tz = False
             continue
-        if upper.startswith("BEGIN:V") and not upper.startswith("BEGIN:VCALENDAR"):
+        if block is None and upper.startswith("BEGIN:V") \
+                and not upper.startswith("BEGIN:VCALENDAR"):
             block = [line]
-            kind = upper[len("BEGIN:"):]
+            depth = 1
             continue
         if block is not None:
             block.append(line)
-            if upper.startswith("END:" + kind):
-                uid = ""
-                for entry in block:
-                    if entry.upper().startswith("UID:"):
-                        uid = entry.split(":", 1)[1].strip()
-                if not uid:
-                    uid = "p21-" + hashlib.sha1(
-                        "\n".join(block).encode()).hexdigest()[:24]
-                    block.insert(1, "UID:" + uid)
-                if uid not in comps:
-                    comps[uid] = []
-                    order.append(uid)
-                comps[uid].append("\r\n".join(block))
+            if upper.startswith("BEGIN:"):
+                depth += 1
+            elif upper.startswith("END:"):
+                depth -= 1
+            if depth > 0:
+                continue
+            # UID jen z vlastní úrovně události — připomínka může mít svůj
+            uid = ""
+            level = 0
+            for entry in block:
+                head = "" if entry[:1] in (" ", "\t") else entry.strip().upper()
+                if head.startswith("BEGIN:"):
+                    level += 1
+                elif head.startswith("END:"):
+                    level -= 1
+                elif level == 1 and not uid and head.startswith("UID:"):
+                    uid = entry.split(":", 1)[1].strip()
+            if not uid:
+                uid = "p21-" + hashlib.sha1(
+                    "\n".join(block).encode()).hexdigest()[:24]
+                block.insert(1, "UID:" + uid)
+            if uid not in comps:
+                comps[uid] = []
+                order.append(uid)
+            comps[uid].append("\r\n".join(block))
+            block = None
             continue
         if upper.startswith("BEGIN:VCALENDAR") or upper.startswith("VERSION:") \
                 or upper.startswith("PRODID:") or upper.startswith("CALSCALE:"):
@@ -1754,14 +1899,125 @@ def dav_href(uid, suffix):
     return safe + suffix
 
 
-def dav_import_run(user, kind, items):
-    """Položky se ukládají po jedné; existující UID se přeskočí."""
+CREDIT_UID = "phone21-kredity-site"
+CREDIT_TICK = 3600
+CREDIT_ALARMS = ("-P3D", "-P1D")
+_credit_state = {"runs_until": 0, "credits": None, "cut": False, "checked": 0}
+
+
+def credit_state_path():
+    return os.path.join(STATE_DIR, "credit_event")
+
+
+def _ics_text(value):
+    return (value.replace("\\", "\\\\").replace(";", "\\;")
+            .replace(",", "\\,").replace("\n", "\\n"))
+
+
+def _ics_fold(line):
+    """Řádek nejvýš 75 bajtů, pokračování začíná mezerou (znak se nedělí)."""
+    out, cur = [], ""
+    for ch in line:
+        if len((cur + ch).encode("utf-8")) > 74:
+            out.append(cur)
+            cur = " "
+        cur += ch
+    out.append(cur)
+    return "\r\n".join(out)
+
+
+def credit_event_ics(runs_until, now=None):
+    """Událost „síť se zastaví“ v okamžiku, kdy dojdou kredity, s připomínkami."""
+    now = int(now or time.time())
+    fmt = "%Y%m%dT%H%M%SZ"
+    when = time.strftime("%-d. %-m. %Y v %H:%M", time.localtime(runs_until))
+    desc = ("Kredity privátní sítě vystačí do %s. Pak telefon přestane "
+            "dosáhnout na miniserver. Dobít jde v Moje síť: %s"
+            % (when, net_dashboard_url()))
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Phone21//kredity//CS",
+             "BEGIN:VEVENT", "UID:" + CREDIT_UID,
+             "DTSTAMP:" + time.strftime(fmt, time.gmtime(now)),
+             "DTSTART:" + time.strftime(fmt, time.gmtime(runs_until)),
+             "DTEND:" + time.strftime(fmt, time.gmtime(runs_until + 1800)),
+             "SUMMARY:" + _ics_text("Phone21: dojdou kredity sítě — dobij"),
+             "DESCRIPTION:" + _ics_text(desc), "TRANSP:TRANSPARENT"]
+    for trigger in CREDIT_ALARMS:
+        lines += ["BEGIN:VALARM", "ACTION:DISPLAY",
+                  "DESCRIPTION:" + _ics_text("Phone21: kredity sítě docházejí"),
+                  "TRIGGER:" + trigger, "END:VALARM"]
+    lines += ["END:VEVENT", "END:VCALENDAR"]
+    return "\r\n".join(_ics_fold(x) for x in lines) + "\r\n"
+
+
+def credit_sync():
+    """Zeptá se koordinátora, dokdy síť jede, a podle toho udržuje událost
+    ve společném kalendáři. Zapisuje se jen při změně data — událost, kterou
+    si uživatel smaže, se vrátí až s novým termínem. Bez zařízení nebo
+    s pozastavenou sítí událost zmizí (není na co upozorňovat)."""
+    res = partner_post("/partner/status", PARTNER_TIMEOUT_PHONE)
+    if res["ok"]:
+        data = res["data"]
+        runs = data.get("runs_until")
+        if not isinstance(runs, int) or isinstance(runs, bool):
+            return
+        cut = bool(data.get("cut"))
+        credits = data.get("credits") if isinstance(data.get("credits"), int) else None
+    elif res["kind"] == "no_token" or res["status"] in (401, 403):
+        # token odvolaný nebo účet v mazání — připomínka by jen lhala
+        runs, cut, credits = 0, False, None
+    else:
+        return
+    with _dav_lock:
+        _credit_state.update(runs_until=runs, credits=credits, cut=cut,
+                             checked=int(time.time()))
+    want = 0 if cut or runs <= 0 else runs
+    try:
+        have = int(open(credit_state_path()).read().strip() or 0)
+    except (OSError, ValueError):
+        have = -1
+    if want == have:
+        return
+    path = "/%s/%s/%s.ics" % (DAV_SHARED, DAV_CAL, CREDIT_UID)
+    if want:
+        ok, _ = dav_ensure_collections(DAV_SHARED)
+        if not ok:
+            return
+        status, _ = dav_request("PUT", path, credit_event_ics(want).encode("utf-8"),
+                                "text/calendar; charset=utf-8")
+        if status not in (201, 204):
+            audit("kredity: událost v kalendáři nejde uložit (%s)" % status)
+            return
+    else:
+        status, _ = dav_request("DELETE", path)
+        if status not in (200, 204, 404):
+            return
+    try:
+        write_state(credit_state_path(), "%d\n" % want)
+    except OSError:
+        pass
+    audit("kredity: událost v kalendáři %s" % (
+        time.strftime("%Y-%m-%d %H:%M", time.localtime(want)) if want else "odebrána"))
+
+
+def credit_loop():
+    time.sleep(90)
+    while True:
+        try:
+            credit_sync()
+        except Exception as e:
+            audit("kredity: kontrola selhala: %s" % e)
+        time.sleep(CREDIT_TICK)
+
+
+def dav_import_run(kind, items):
+    """Položky se ukládají po jedné do společného adresáře nebo kalendáře;
+    existující UID se přeskočí."""
     collection = DAV_BOOK if kind == "vcard" else DAV_CAL
     ctype = "text/vcard; charset=utf-8" if kind == "vcard" \
         else "text/calendar; charset=utf-8"
     suffix = ".vcf" if kind == "vcard" else ".ics"
     for uid, body in items:
-        path = "/%s/%s/%s" % (user, collection, dav_href(uid, suffix))
+        path = "/%s/%s/%s" % (DAV_SHARED, collection, dav_href(uid, suffix))
         status, data = dav_request(
             "PUT", path, body.encode("utf-8"), ctype,
             {"If-None-Match": "*"},
@@ -1785,7 +2041,7 @@ def dav_import_run(user, kind, items):
         kind, _dav_import["done"], _dav_import["skipped"], _dav_import["failed"]))
 
 
-def dav_import_start(user, raw):
+def dav_import_start(raw):
     """Rozpozná druh souboru a spustí import na pozadí."""
     try:
         text = raw.decode("utf-8-sig")
@@ -1809,8 +2065,13 @@ def dav_import_start(user, raw):
         _dav_import.update({"running": True, "done": 0, "skipped": 0,
                             "failed": 0, "total": len(items), "errors": [],
                             "kind": kind})
-    audit("dav import start %s %d položek → %s" % (kind, len(items), user))
-    threading.Thread(target=dav_import_run, args=(user, kind, items),
+    ok, detail = dav_ensure_collections(DAV_SHARED)
+    if not ok:
+        with _dav_lock:
+            _dav_import["running"] = False
+        return "[OVL-E26] Úložiště teď nejde použít: %s" % esc(detail)
+    audit("dav import start %s %d položek" % (kind, len(items)))
+    threading.Thread(target=dav_import_run, args=(kind, items),
                      daemon=True).start()
     return ""
 
@@ -2224,6 +2485,11 @@ def page_home(info=""):
                     "internet z mobilních dat SIM. Data se účtují podle "
                     "tarifu.")))
 
+    rat = rat_block()
+    ratcard = ('<div class="card"><h2 style="margin-top:0">Síť modemu</h2>'
+               "<p class=\"muted\">Na jakou mobilní síť se modem smí "
+               "připojit:</p>%s</div>" % rat) if rat else ""
+
     return render("home", (
         '%s<h1>Přehled</h1><div class="tiles">%s</div>'
         '<div class="tiles" style="margin-top:1.6rem">'
@@ -2232,8 +2498,9 @@ def page_home(info=""):
         "chatu. Tohle určuje, co uslyší volající:</p>%s</div>"
         '<div class="card"><h2 style="margin-top:0">Ostrovní režim</h2>'
         "<p class=\"muted\">Záloha internetu z mobilních dat, když vypadne "
-        "linka:</p>%s%s</div></div>"
-    ) % (info, "".join(tiles), missed, islandform, islandnote))
+        "linka:</p>%s%s</div>"
+        "%s</div>"
+    ) % (info, "".join(tiles), missed, islandform, islandnote, ratcard))
 
 
 def page_status(mode_info=""):
@@ -2312,6 +2579,9 @@ def page_status(mode_info=""):
             "" if volte_state() == "registered" else
             " — bez něj přepne modem hovor do starší sítě a datové spojení "
             "na tu dobu padá; hlídka ho po hovoru postaví znovu."))
+        rat = rat_block()
+        if rat:
+            body += "<h2>Síť modemu</h2>" + rat
     body += '<p><button class="ghost" onclick="location.reload()">Obnovit</button></p>'
     return render("status", body)
 
@@ -2459,31 +2729,51 @@ def _dav_user_row(name):
         "<button>Nové heslo</button></form> "
         '<form class="inline" method="post" action="%s">'
         '<input type="hidden" name="user" value="%s">'
-        '<label class="small"><input type="checkbox" name="drop" value="1"> '
-        "smazat i data</label> "
         '<button class="ghost">Smazat</button></form></td></tr>'
     ) % (esc(name), u("/dav/user/pass"), esc(name),
          u("/dav/user/del"), esc(name))
 
 
 def page_dav(info=""):
-    """Kontakty a kalendář: účty pro zařízení, import, návod k nastavení."""
+    """Kontakty a kalendář: zařízení, import, návod k nastavení."""
     blocks = [info, "<h1>Kontakty a kalendář</h1>"]
     status, _ = dav_request("PROPFIND", "/", None, None, {"Depth": "0"})
     if status == 0:
         blocks.append('<p class="bad">[OVL-E23] Úložiště zatím neodpovídá — '
                       "zkus to za chvíli.</p>")
+    with _dav_lock:
+        mig = dict(_dav_migration)
+    if mig["names"]:
+        blocks.append(
+            '<p class="ok">Kontakty a kalendáře dřívějších účtů (%s) jsou teď '
+            "ve společném adresáři (přeneseno %d položek). V synchronizační "
+            "aplikaci obnov seznam adresářů a zapni ten nový.</p>"
+            % (esc(", ".join(mig["names"])), mig["copied"]))
+    if mig["failed"]:
+        blocks.append(
+            '<p class="warn">Při přenosu do společného adresáře se %d položek '
+            "nepodařilo zkopírovat — zůstávají v původním účtu a zkusí se "
+            "znovu po restartu aplikace.</p>" % mig["failed"])
+    with _dav_lock:
+        credit = dict(_credit_state)
+    if credit["checked"] and credit["runs_until"] > 0 and not credit["cut"]:
+        blocks.append(
+            '<p class="muted">V kalendáři je připomínka, kdy dojdou kredity '
+            "sítě: <b>%s</b> (upozornění 3 dny a 1 den předem).</p>"
+            % esc(time.strftime("%-d. %-m. %Y %H:%M",
+                                time.localtime(credit["runs_until"]))))
     users = [x for x in sorted(dav_read_users()) if x != DAV_ADMIN]
     rows = "".join(_dav_user_row(x) for x in users) or \
-        '<tr><td colspan="2" class="muted">zatím žádný účet</td></tr>'
+        '<tr><td colspan="2" class="muted">zatím žádné zařízení</td></tr>'
     blocks.append(
-        "<h2>Účty</h2>"
-        "<p>Každé zařízení dostane vlastní účet. Heslo se ukáže jen jednou — "
-        "zapiš si ho, jinak vydej nové.</p>"
-        "<table><tr><th>účet</th><th></th></tr>%s</table>"
+        "<h2>Zařízení</h2>"
+        "<p>Všechna zařízení vidí <b>tentýž adresář kontaktů a kalendář</b>. "
+        "Každé dostane vlastní přihlášení — ztracené zařízení smažeš a ostatní "
+        "běží dál. Heslo se ukáže jen jednou, zapiš si ho, jinak vydej nové.</p>"
+        "<table><tr><th>zařízení</th><th></th></tr>%s</table>"
         '<form class="inline" method="post" action="%s">'
-        '<input name="user" placeholder="jmeno" size="20" required>'
-        "<button>Založit účet</button></form>"
+        '<input name="user" placeholder="např. telefon" size="20" required>'
+        "<button>Přidat zařízení</button></form>"
         '<p class="small muted">Jméno: malá písmena, číslice, tečka, pomlčka '
         "nebo podtržítko, 2–32 znaků.</p>" % (rows, u("/dav/user/add")))
 
@@ -2501,17 +2791,14 @@ def page_dav(info=""):
                if imp["errors"] else ""))
         if imp["running"]:
             blocks.append('<meta http-equiv="refresh" content="3">')
-    options = "".join("<option>%s</option>" % esc(x) for x in users) or \
-        '<option value="">(nejdřív založ účet)</option>'
     blocks.append(
         "<h2>Import ze starého telefonu</h2>"
-        "<p>Nahraj soubor <b>.vcf</b> (kontakty) nebo <b>.ics</b> (kalendář). "
-        "Položky, které už na miniserveru jsou, se přeskočí — import jde "
-        "opakovat.</p>"
+        "<p>Nahraj soubor <b>.vcf</b> (kontakty) nebo <b>.ics</b> (kalendář) — "
+        "uloží se do společného adresáře nebo kalendáře. Položky, které už na "
+        "miniserveru jsou, se přeskočí, import jde opakovat.</p>"
         '<form method="post" action="%s" enctype="multipart/form-data">'
-        '<label>Účet: <select name="user">%s</select></label> '
         '<input type="file" name="file" required> '
-        "<button>Nahrát</button></form>" % (u("/dav/import"), options))
+        "<button>Nahrát</button></form>" % u("/dav/import"))
 
     url_rows = "".join(
         '<tr><td>%s</td><td class="mono">%s</td></tr>' % (esc(label), esc(url))
@@ -2521,15 +2808,18 @@ def page_dav(info=""):
         "<table><tr><th>odkud</th><th>adresa</th></tr>%s</table>"
         "<p><b>Android:</b> nainstaluj synchronizační aplikaci (DAVx⁵ "
         "z F-Droidu), přidej účet volbou <i>Přihlásit se pomocí URL a jména</i>, "
-        "vlož adresu výše, jméno účtu a heslo. Potvrď nešifrované spojení "
-        "v domácí síti a zapni <i>Kontakty</i> i <i>Kalendář</i>. V každém "
-        "profilu telefonu zvlášť.</p>"
+        "vlož adresu výše, jméno zařízení a jeho heslo. Potvrď nešifrované "
+        "spojení v domácí síti a zapni <i>Kontakty</i> i <i>Kalendář</i>. "
+        "V každém profilu telefonu zvlášť.</p>"
         "<p><b>iPhone:</b> Nastavení → Aplikace → Kontakty → Účty → Přidat "
         "účet → Jiné → Přidat účet CardDAV; server je adresa výše bez "
         "<i>http://</i>, v Upřesnit vypni SSL a nastav port %s. Kalendář "
         "stejně přes CalDAV.</p>"
-        '<p class="small muted">Mimo domov funguje synchronizace jen přes '
-        "privátní síť.</p>" % (url_rows, esc(DAV_PORT)))
+        '<p class="small muted">Klient, který si adresář nenajde sám, dostane '
+        "přímou adresu: <span class=\"mono\">…/%s/%s/</span> (kontakty) "
+        "a <span class=\"mono\">…/%s/%s/</span> (kalendář). Mimo domov "
+        "funguje synchronizace jen přes privátní síť.</p>"
+        % (url_rows, esc(DAV_PORT), DAV_SHARED, DAV_BOOK, DAV_SHARED, DAV_CAL))
     return render("dav", "".join(blocks))
 
 
@@ -2950,14 +3240,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_dav(
                     '<p class="bad">[OVL-E28] Soubor je moc velký '
                     "(limit 20 MB).</p>"))
-            user = (fields or {}).get("user", "").strip()
-            if not DAV_USER_RE.match(user) or user not in dav_read_users():
-                return self._html(page_dav(
-                    '<p class="bad">[OVL-E24] Vyber existující účet.</p>'))
             if not content:
                 return self._html(page_dav(
                     '<p class="bad">[OVL-E27] Soubor je prázdný.</p>'))
-            err = dav_import_start(user, content)
+            err = dav_import_start(content)
             if err:
                 return self._html(page_dav('<p class="bad">%s</p>' % err))
             return self._html(page_dav(
@@ -3017,6 +3303,21 @@ class Handler(BaseHTTPRequestHandler):
             saved = get_missed_mode()
             info = ('<p class="ok">Uloženo (%s).</p>' % esc(saved)) if saved == mode \
                 else '<p class="bad">[OVL-E16] Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
+            return self._html(page(info))
+        if self.path == "/rat-mode":
+            page = page_home if GUI else page_status
+            want = form.get("rat", "")
+            if want not in RAT_MODES:
+                return self._html(page('<p class="bad">[OVL-E07] Neplatná volba.</p>'))
+            # Hlídka modemu v ústředně si klíč čte každou minutu a nastavení
+            # modemu srovná sama.
+            cli("database put phone21 rat_mode " + want)
+            saved = get_rat_mode()
+            audit("rat-mode ip=%s value=%s" % (self.client_address[0], want))
+            info = ('<p class="ok">Síť modemu: %s.</p>'
+                    % ("jen 4G" if saved == "secure" else "4G, 3G i 2G")) \
+                if saved == want else \
+                '<p class="bad">[OVL-E17] Zápis se nepotvrdil — zkontroluj spojení s telefonní částí.</p>'
             return self._html(page(info))
         if self.path == "/island-mode":
             page = page_home if GUI else page_status
@@ -3113,25 +3414,26 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(page_net(info))
         if self.path.startswith("/dav/user/") and DAV_ENABLED:
             name = form.get("user", "").strip().lower()
-            if not DAV_USER_RE.match(name) or name == DAV_ADMIN:
+            if not DAV_USER_RE.match(name) or name in (DAV_ADMIN, DAV_SHARED):
                 return self._html(page_dav(
-                    '<p class="bad">[OVL-E24] Tohle jméno účtu nejde '
+                    '<p class="bad">[OVL-E24] Tohle jméno zařízení nejde '
                     "použít.</p>"))
             if self.path == "/dav/user/add":
                 password, err = dav_user_add(name)
             elif self.path == "/dav/user/pass":
                 password, err = dav_user_reset(name)
             elif self.path == "/dav/user/del":
-                err = dav_user_del(name, form.get("drop", "") == "1")
+                err = dav_user_del(name)
                 return self._html(page_dav(
                     ('<p class="bad">%s</p>' % err) if err else
-                    '<p class="ok">Účet %s smazán.</p>' % esc(name)))
+                    '<p class="ok">Zařízení %s smazáno — kontakty '
+                    "a kalendář zůstávají.</p>" % esc(name)))
             else:
                 return self._html(page_dav("<p>404</p>"))
             if err:
                 return self._html(page_dav('<p class="bad">%s</p>' % err))
             return self._html(page_dav(
-                '<p class="ok">Účet <b>%s</b>, heslo <span class="mono">%s'
+                '<p class="ok">Zařízení <b>%s</b>, heslo <span class="mono">%s'
                 "</span> — ukáže se jen teď, zapiš si ho.</p>"
                 % (esc(name), esc(password))))
         if self.path == "/net/access":
@@ -3238,6 +3540,9 @@ def main():
         threading.Thread(target=gateway_loop, daemon=True).start()
         print("hlídání připojení brány běží (tik %d s)" % GATEWAY_TICK,
               flush=True)
+    if DAV_ENABLED:
+        threading.Thread(target=dav_migrate_shared, daemon=True).start()
+        threading.Thread(target=credit_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), Handler)
     print("phone21-ui na :%d" % WEBUI_PORT, flush=True)
     srv.serve_forever()

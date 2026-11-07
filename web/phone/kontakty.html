@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phone21 — kontakty a kalendář</title>
+<meta name="description" content="Kontakty a kalendář na vlastním miniserveru: přechod z Googlu, synchronizace telefonu, profilů a dalších zařízení.">
+<style>
+  :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --acc:#F7931A; --card:#161b22; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); line-height:1.65; }
+  main { max-width:820px; margin:0 auto; padding:1.5rem; }
+  header { text-align:center; padding:2.5rem 1rem 1rem; }
+  .logo { height:1.8rem; vertical-align:middle; }
+  h1 { font-size:1.6rem; margin:.5rem 0 0; }
+  h2 { color:var(--acc); margin-top:2.4rem; font-size:1.25rem; }
+  ol.steps { padding-left:1.3rem; }
+  ol.steps li { margin:.55rem 0; }
+  code, pre { background:#010409; border:1px solid #21262d; border-radius:6px; font-size:.88rem; }
+  code { padding:.1rem .35rem; }
+  pre { padding:.8rem 1rem; overflow-x:auto; }
+  a { color:#58a6ff; text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .honest { border-left:3px solid var(--acc); padding:.2rem 1rem; color:var(--dim); background:var(--card); border-radius:0 8px 8px 0; }
+  .req { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
+  footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.5rem 1rem; }
+  nav.top { display:flex; gap:1.4rem; justify-content:center; flex-wrap:wrap;
+    padding:.9rem 1rem; border-bottom:1px solid #21262d; background:#11161d; }
+  nav.top a { color:var(--dim); font-weight:600; font-size:.95rem; }
+  nav.top a:hover, nav.top a.act { color:var(--acc); text-decoration:none; }
+</style>
+</head>
+<body>
+<nav class="top"><a href="/">Domů</a><a href="/obchod/">Obchod</a><a href="/instalace" class="act">Návod</a><a href="/app">Můj účet</a></nav>
+<header>
+  <a href="/"><img class="logo" src="phone21.svg" alt="Phone21"></a>
+  <h1>Kontakty a kalendář</h1>
+</header>
+<main>
+
+<p>Kontakty i kalendář drží tvůj <b>miniserver</b>. Telefon, jeho další
+profily, tablet i počítač se s ním synchronizují, takže mají pořád stejný
+obsah. Kontakty přežijí i ztrátu telefonu a žádný cizí cloud k tomu
+nepotřebuješ.</p>
+
+<div class="req">
+  <p><b>Jak je to postavené:</b> v ovládání miniserveru na záložce
+  <b>Kontakty a kalendář</b> přidáš každé zařízení zvlášť (dostane vlastní
+  jméno a heslo). Všechna zařízení vidí <b>tentýž adresář a tentýž
+  kalendář</b>. Ztracené zařízení smažeš a ostatní běží dál.</p>
+  <p>Do kalendáře miniserver sám vkládá událost <b>„Phone21: dojdou kredity
+  sítě“</b> s upozorněním 3 dny a 1 den předem. Když dobiješ, posune se
+  sama.</p>
+</div>
+
+<h2>1. Přechod ze starého telefonu s účtem Google</h2>
+<p>Přenáší se jednorázově: export z Googlu, import do miniserveru a nový
+telefon si data stáhne. <b>Po exportu už nic neupravuj v Googlu</b> —
+pozdější změny by se nepřenesly.</p>
+<ol class="steps">
+  <li><b>Kontakty do souboru .vcf.</b> V Google Kontaktech nejdřív
+  <i>Sloučit a opravit</i> (duplicity, čísla ve tvaru +420…). Pak na starém
+  telefonu Kontakty → <i>Opravit a spravovat</i> → <i>Exportovat do
+  souboru</i>. Tahle cesta přenese i fotky. Bez telefonu jde export
+  z contacts.google.com → <i>Exportovat</i> → formát vCard, jen bez
+  fotek.</li>
+  <li><b>Kalendář do souborů .ics.</b> Na počítači calendar.google.com →
+  ⚙ <i>Nastavení</i> → <i>Import a export</i> → <i>Exportovat</i>. Ve
+  staženém ZIPu je jeden soubor .ics za každý tvůj kalendář. Státní svátky
+  a kalendáře sdílené od jiných si přidej na novém telefonu znovu.</li>
+  <li><b>Import do miniserveru.</b> Soubory přenes do počítače (kabelem nebo
+  přes LocalSend, ne přes cizí cloud). V ovládání → <b>Kontakty
+  a kalendář</b> nahraj .vcf, počkej na <i>hotovo</i> a pak postupně každý
+  .ics. Všechny kalendáře z Googlu skončí v jednom společném kalendáři,
+  připomínky událostí se přenesou s nimi.</li>
+  <li><b>Nový telefon</b> nastav podle kroku 2.</li>
+  <li><b>Kontrola a rozloučení.</b> Porovnej počty, diakritiku a pár
+  opakovaných událostí. Účet Google na nový telefon nepřidávej, jinak budeš
+  mít všechno dvakrát. Soubory si nech jako zálohu a data u Googlu smaž až
+  po kontrole — smazání se propíše i do starého telefonu.</li>
+</ol>
+<p>Starý telefon je iPhone? Na počítači icloud.com → <i>Kontakty</i> →
+<i>Vybrat vše</i> → <i>Exportovat vCard</i>. Pokud kontakty na iPhonu žijí
+v účtu Google, exportuj je rovnou z Googlu.</p>
+
+<h2>2. Nastavení telefonu</h2>
+<ol class="steps">
+  <li>V ovládání → <b>Kontakty a kalendář</b> → <b>Přidat zařízení</b>
+  (třeba <code>telefon</code>) a zapiš si heslo — ukáže se jen jednou.</li>
+  <li>Nainstaluj synchronizační aplikaci <b>DAVx⁵</b> (F-Droid) → přidej
+  účet volbou <i>Přihlásit se pomocí URL a uživatelského jména</i>. V profilu,
+  kde běží aplikace Phone21, použij adresu pro <b>privátní síť</b> (funguje
+  doma i venku), jinde adresu pro <b>domácí síť</b>. Obě vypisuje ovládání.
+  Zapni <i>Kontakty</i> i <i>Kalendář</i>.</li>
+  <li>Aby synchronizace šla i mimo domov, v aplikaci Phone21 na obrazovce
+  <b>Konexe</b> zvol <i>Přístup na miniserver</i>, nebo zapni
+  <i>Synchronizovat kontakty i přes privátní síť</i>.</li>
+  <li>Nové záznamy ukládej do miniserveru, ne do „Telefon / Zařízení“:
+  v Kontaktech nastav <i>Výchozí účet pro nové kontakty</i> na účet
+  z DAVx⁵, v Phone21 (Konexe → Kontakty) zvol adresář z miniserveru.
+  Kalendářová aplikace na telefonech bez služeb Googlu obvykle chybí —
+  nainstaluj Fossify Calendar nebo Etar a nové události zakládej do
+  kalendáře z miniserveru.</li>
+</ol>
+<p><b>iPhone:</b> Nastavení → Aplikace → Kontakty → Účty → Přidat účet →
+Jiné → Přidat účet CardDAV. Server je adresa pro domácí síť bez
+<code>http://</code>, v <i>Upřesnit</i> vypni SSL a nastav port 5232.
+Kalendář stejně přes CalDAV. iPhone se synchronizuje jen doma.</p>
+<p><b>Počítač:</b> v Thunderbirdu nový adresář CardDAV a nový kalendář
+<i>v síti</i> — adresa z ovládání, jméno a heslo zařízení. Přímé adresy
+jsou <code>…:5232/spolecne/kontakty/</code> a
+<code>…:5232/spolecne/kalendar/</code>.</p>
+
+<h2>3. Víc profilů a víc zařízení</h2>
+<p>Každý profil a každé zařízení dostane v ovládání <b>vlastní
+přihlášení</b> a vlastní DAVx⁵. Obsah je všude stejný.</p>
+<ul>
+  <li><b>Profily telefonu</b> o sobě navzájem nevědí, takže DAVx⁵ nastav
+  v každém zvlášť. Hovory a zprávy chodí jen do profilu s aplikací Phone21
+  a jména volajících bere z kontaktů téhož profilu.</li>
+  <li>Privátní síť běží jen v profilu s aplikací Phone21. Ostatní profily
+  se synchronizují doma přes Wi-Fi (v DAVx⁵ zapni <i>Synchronizovat jen
+  přes Wi-Fi</i>) a změny z cesty se dorovnají po návratu.</li>
+  <li>Další zařízení (tablet, druhý telefon, počítač) se doma připojí přes
+  domácí síť. Mimo domov jen zařízení připojené do privátní sítě, a každé
+  takové čerpá kredit.</li>
+</ul>
+
+<h2>4. Jak s tím zacházet</h2>
+<ul>
+  <li>Jedno místo pravdy je adresář a kalendář z miniserveru. Smazání se
+  propíše na všechna zařízení.</li>
+  <li>Čísla drž ve tvaru <b>+420…</b>, párování volajícího na jméno je na
+  něm nejspolehlivější.</li>
+  <li>Jednou za čas si udělej export kontaktů i kalendáře do souboru a ulož
+  ho mimo miniserver.</li>
+  <li>Ztracené nebo prodané zařízení v ovládání smaž. Ostatní si ničeho
+  nevšimnou.</li>
+</ul>
+
+<p class="honest">Kompletní verze návodu včetně varianty bez synchronizace
+je v <a href="https://github.com/twentyone-cz/phone21/blob/v0.9.35/docs/telefon.md">dokumentaci
+k telefonu</a>.</p>
+
+<footer>
+  <a href="/instalace">← zpět na instalaci</a>
+</footer>
+</main>
+</body>
+</html>
