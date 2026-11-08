@@ -2898,7 +2898,8 @@ def dav_login_block(name, password):
         for i, (label, link) in enumerate(links))
     html = (
         "<h2>Nastavení DAVx⁵ jedním skenem</h2>"
-        "<p>Naskenuj kód telefonem (fotoaparát nebo čtečka QR kódů). Otevře "
+        "<p>Naskenuj kód telefonem (fotoaparát nebo čtečka QR kódů, třeba "
+        "Binary Eye ze Zapstore). Otevře "
         "se DAVx⁵ s vyplněnou adresou, jménem i heslem — potvrď přihlášení "
         "pomocí URL, pak <i>Přihlásit</i> a zapni Kontakty i Kalendář. Když "
         "máš ovládání otevřené přímo v telefonu, stačí klepnout na tlačítko.</p>"
@@ -2992,7 +2993,7 @@ def page_dav(info="", login=None):
         "<h2>Nastavení zařízení</h2>"
         "<table><tr><th>odkud</th><th>adresa</th></tr>%s</table>"
         "<p><b>Android:</b> nainstaluj synchronizační aplikaci (DAVx⁵ "
-        "z F-Droidu), přidej účet volbou <i>Přihlásit se pomocí URL a jména</i>, "
+        "ze Zapstore), přidej účet volbou <i>Přihlásit se pomocí URL a jména</i>, "
         "vlož adresu výše, jako uživatelské jméno jméno zařízení z tabulky "
         "a jeho heslo. Potvrď nešifrované "
         "spojení v domácí síti a zapni <i>Kontakty</i> i <i>Kalendář</i>. "

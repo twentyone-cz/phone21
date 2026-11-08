@@ -27,7 +27,7 @@ a kalendář** → **Přidat zařízení**:
   hlídá okamžik, kdy by se privátní síť zastavila. Když dobiješ, událost se
   sama posune. Funguje, když je miniserver připojený do sítě tokenem brány.
 
-Synchronizaci v telefonu obstarává aplikace **DAVx⁵** (F-Droid). Kontakty,
+Synchronizaci v telefonu obstarává aplikace **DAVx⁵** ([Zapstore](https://zapstore.dev/apps/at.bitfire.davdroid)). Kontakty,
 které stáhne, ukládá do adresáře telefonu, takže je vidí aplikace Phone21
 (jména volajících), auto přes Bluetooth i ostatní aplikace.
 
@@ -63,14 +63,15 @@ sluč duplicity a sjednoť čísla na tvar **+420…**. Pak vyber jednu z cest:
    vyber jen *Kalendář*.
 4. Export obsahuje jen kalendáře, které jsou tvoje. Odebírané kalendáře
    (státní svátky, kalendáře sdílené od jiných) si na novém telefonu přidej
-   znovu, svátky třeba jako předplatné v aplikaci **ICSx⁵** (F-Droid).
+   znovu, svátky třeba jako předplatné v aplikaci **ICSx⁵** (v Zapstore zatím není —
+   [GitHub vývojářů](https://github.com/bitfireAT/icsx5/releases)).
    Narozeniny se neexportují. Kalendářová aplikace je umí ukázat sama
    z kontaktů (Fossify Calendar má volbu v nastavení).
 
 **Krok 3: import do miniserveru**
 
 1. Soubory přenes do počítače, ze kterého otevíráš ovládání: USB kabelem
-   nebo přes **LocalSend** (F-Droid) po Wi-Fi. Cizí cloud nepoužívej, je to
+   nebo přes **LocalSend** ([Zapstore](https://zapstore.dev/apps/org.localsend.localsend_app)) po Wi-Fi. Cizí cloud nepoužívej, je to
    celý tvůj adresář.
 2. Ovládání → **Kontakty a kalendář** → v části **Import ze starého
    telefonu** nahraj `.vcf`. Počkej, až import ukáže *hotovo*, a pak nahraj
@@ -103,9 +104,10 @@ importu ověř, jestli se do exportu dostanou, se liší.
 
 **Android**
 
-1. Nainstaluj **DAVx⁵** (F-Droid).
+1. Nainstaluj **DAVx⁵** ([Zapstore](https://zapstore.dev/apps/at.bitfire.davdroid)).
 2. V ovládání přidej zařízení (třeba `telefon`). Ovládání ukáže **QR kód** —
-   naskenuj ho telefonem a otevře se DAVx⁵ s vyplněnou adresou, jménem
+   naskenuj ho telefonem (fotoaparátem nebo čtečkou **Binary Eye**,
+   [Zapstore](https://zapstore.dev/apps/de.markusfisch.android.binaryeye)) a otevře se DAVx⁵ s vyplněnou adresou, jménem
    i heslem; potvrď přihlášení pomocí URL, *Přihlásit* a zapni **Kontakty**
    i **Kalendář**. Kódy jsou dva, podle adresy (viz níž). Na telefonu, kde
    máš ovládání otevřené, stačí klepnout na *Otevřít v DAVx⁵*.
@@ -135,7 +137,8 @@ importu ověř, jestli se do exportu dostanou, se liší.
    - **Phone21:** Konexe → Kontakty → *Nové kontakty ukládat do* → adresář
      z miniserveru. Volba *Automaticky* ho vybere sama, když je jediný.
    - **Kalendář:** na telefonech bez služeb Googlu (GrapheneOS) kalendářová
-     aplikace obvykle chybí. Nainstaluj **Fossify Calendar** nebo **Etar** (F-Droid).
+     aplikace obvykle chybí. Nainstaluj **Fossify Calendar** nebo **Etar**
+     ([Zapstore](https://zapstore.dev/apps/org.fossify.calendar), [Zapstore](https://zapstore.dev/apps/ws.xsoh.etar)).
      Ve Fossify Calendar zapni v nastavení synchronizaci CalDAV a vyber
      kalendář z miniserveru. Etar ho ukáže sám. Nové události zakládej do
      kalendáře z miniserveru.
@@ -214,7 +217,8 @@ vlastní přihlášení a vlastní DAVx⁵.** Obsah je všude stejný.
 ### 1E. Varianta bez synchronizace (jen do telefonu)
 
 Když synchronizaci nechceš, jde `.vcf` naimportovat přímo do telefonu:
-**Fossify Contacts** (F-Droid) → Settings → *Import contacts* → vybrat
+**Fossify Contacts** (v Zapstore zatím není —
+[GitHub vývojářů](https://github.com/FossifyOrg/Contacts/releases)) → Settings → *Import contacts* → vybrat
 soubor → cíl **Phone storage / lokální úložiště** (ne účet). Zvládá
 vCard 3.0/4.0 spolehlivě. AOSP Kontakty to umí taky (Fix & manage →
 Settings → Import), ale u větších moderních vCard jsou opakovaná hlášení
@@ -271,7 +275,7 @@ Rozumný kompromis:
 - v Googlu nech jen kalendáře sdílené s ostatními (práce, rodina)
   a synchronizuj je přes DAVx⁵;
 - kalendář, do kterého jen koukáš (cizí sdílený, svátky), odebírej jen ke
-  čtení aplikací **ICSx⁵** (F-Droid) přes tajnou adresu iCal z nastavení
+  čtení aplikací **ICSx⁵** (GitHub vývojářů, viz výše) přes tajnou adresu iCal z nastavení
   Google Kalendáře. Do telefonu se pak nepřihlašuje žádný účet Google. Tajná
   adresa ale funguje jako heslo — kdo ji zná, kalendář přečte.
 
@@ -304,8 +308,8 @@ o zařízení a kalendář Google vidí celý.
 Zdroje: [export Google kontaktů](https://support.google.com/contacts/answer/7199294),
 [export Google kalendáře](https://support.google.com/calendar/answer/37111),
 [export vCard z iCloudu](https://support.apple.com/guide/icloud-web-only/mmfba748b2/icloud),
-[DAVx⁵](https://f-droid.org/packages/at.bitfire.davdroid/),
-[Fossify Contacts](https://f-droid.org/en/packages/org.fossify.contacts/).
+[DAVx⁵](https://zapstore.dev/apps/at.bitfire.davdroid),
+[Fossify Contacts](https://github.com/FossifyOrg/Contacts/releases).
 
 ## 2. Párování SMS a hovorů na jména
 
