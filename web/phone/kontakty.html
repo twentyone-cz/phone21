@@ -105,11 +105,24 @@ v účtu Google, exportuj je rovnou z Googlu.</p>
   <i>Synchronizovat kontakty i přes privátní síť</i>.</li>
   <li>Nové záznamy ukládej do miniserveru, ne do „Telefon / Zařízení“:
   v Kontaktech nastav <i>Výchozí účet pro nové kontakty</i> na účet
-  z DAVx⁵, v Phone21 (Konexe → Kontakty) zvol adresář z miniserveru.
-  Kalendářová aplikace na telefonech bez služeb Googlu (GrapheneOS) obvykle chybí —
-  nainstaluj <a href="https://zapstore.dev/apps/org.fossify.calendar">Fossify Calendar</a> nebo
-  <a href="https://zapstore.dev/apps/ws.xsoh.etar">Etar</a> (Zapstore) a nové události zakládej do
-  kalendáře z miniserveru.</li>
+  z DAVx⁵, v Phone21 (Konexe → Kontakty) zvol adresář z miniserveru.</li>
+  <li><b>Kalendář zobrazuje kalendářová aplikace</b> — DAVx⁵ jen synchronizuje.
+  Na telefonech bez služeb Googlu (GrapheneOS) obvykle chybí; doporučujeme
+  <a href="https://zapstore.dev/apps/org.fossify.calendar">Fossify Calendar</a>
+  (Zapstore), jednodušší alternativa je
+  <a href="https://zapstore.dev/apps/ws.xsoh.etar">Etar</a>. Pro Fossify Calendar:
+  <ul>
+    <li>v systému <i>Nastavení → Aplikace → Fossify Calendar → Oprávnění</i>
+    vypni <b>Síť</b>, pokud ji nabízí — kalendář síť nepotřebuje,
+    synchronizaci dělá DAVx⁵; oprávnění <i>Kontakty</i> potřebuje jen kvůli
+    narozeninám;</li>
+    <li>povol <b>oznámení</b>, jinak nepřijdou připomínky (ani ta, že
+    docházejí kredity sítě);</li>
+    <li>v aplikaci <i>Nastavení → Synchronizace CalDAV</i> zapni a vyber
+    kalendář z miniserveru;</li>
+    <li>jako výchozí pro nové události nastav kalendář z miniserveru.</li>
+  </ul>
+  Etar ukáže kalendáře z DAVx⁵ sám, oznámení mu povol taky.</li>
 </ol>
 <p><b>iPhone:</b> Nastavení → Aplikace → Kontakty → Účty → Přidat účet →
 Jiné → Přidat účet CardDAV. Server je adresa pro domácí síť bez
