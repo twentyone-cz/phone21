@@ -1,6 +1,5 @@
 [server]
-# 5555 = adresa pro zařízení; 5232 jen kvůli zařízením nastaveným dřív
-hosts = 0.0.0.0:5555, 0.0.0.0:5232
+hosts = 0.0.0.0:5555
 max_connections = 20
 
 [auth]

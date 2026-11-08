@@ -2867,9 +2867,60 @@ def _dav_user_row(name):
          u("/dav/user/del"), esc(name), esc(name))
 
 
-def page_dav(info=""):
-    """Kontakty a kalendář: zařízení, import, návod k nastavení."""
+def dav_login_links(name, password):
+    """Odkazy, které otevřou DAVx⁵ s vyplněnou adresou, jménem i heslem
+    (caldav:// převede na http://, port i cestu nechá) — privátní síť první."""
+    out = []
+    for label, url in sorted(dav_urls(), key=lambda x: x[0] != "privátní síť"):
+        parts = urllib.parse.urlsplit(url)
+        out.append((label, "caldav://%s:%s@%s%s" % (
+            urllib.parse.quote(name, safe=""), urllib.parse.quote(password, safe=""),
+            parts.netloc, parts.path or "/")))
+    return out
+
+
+DAV_LINK_NOTE = {
+    "privátní síť": "pro telefon s aplikací Phone21 — doma i venku",
+    "domácí síť": "pro ostatní zařízení — synchronizují se doma",
+}
+
+
+def dav_login_block(name, password):
+    """QR kódy a odkazy pro DAVx⁵ → (html, skript)."""
+    links = dav_login_links(name, password)
+    if not links:
+        return "", ""
+    cells = "".join(
+        '<div class="card"><b>%s</b><p class="small muted">%s</p>'
+        '<div id="davqr%d" class="qr"></div>'
+        '<p><a class="btn" href="%s">Otevřít v DAVx⁵</a></p></div>'
+        % (esc(label), esc(DAV_LINK_NOTE.get(label, "")), i, esc(link))
+        for i, (label, link) in enumerate(links))
+    html = (
+        "<h2>Nastavení DAVx⁵ jedním skenem</h2>"
+        "<p>Naskenuj kód telefonem (fotoaparát nebo čtečka QR kódů). Otevře "
+        "se DAVx⁵ s vyplněnou adresou, jménem i heslem — potvrď přihlášení "
+        "pomocí URL, pak <i>Přihlásit</i> a zapni Kontakty i Kalendář. Když "
+        "máš ovládání otevřené přímo v telefonu, stačí klepnout na tlačítko.</p>"
+        '<div class="tiles">%s</div>'
+        '<p class="small muted">Kódy obsahují heslo a ukazují se jen teď.</p>'
+        % cells)
+    script = '<script src="%s"></script><script>%s</script>' % (
+        u("/static/qrcode.min.js"), "".join(
+            'new QRCode(document.getElementById("davqr%d"), {text: %s, width: 220, '
+            "height: 220, correctLevel: QRCode.CorrectLevel.M});"
+            % (i, json.dumps(link)) for i, (_, link) in enumerate(links)))
+    return html, script
+
+
+def page_dav(info="", login=None):
+    """Kontakty a kalendář: zařízení, import, návod k nastavení. login =
+    (jméno, heslo) právě vydaného přihlášení → QR pro DAVx⁵."""
     blocks = [info, "<h1>Kontakty a kalendář</h1>"]
+    script = ""
+    if login:
+        html, script = dav_login_block(*login)
+        blocks.append(html)
     status, _ = dav_request("PROPFIND", "/", None, None, {"Depth": "0"})
     if status == 0:
         blocks.append('<p class="bad">[OVL-E23] Úložiště zatím neodpovídá — '
@@ -2955,7 +3006,7 @@ def page_dav(info=""):
         "a <span class=\"mono\">…/%s/%s/</span> (kalendář). Mimo domov "
         "funguje synchronizace jen přes privátní síť.</p>"
         % (url_rows, esc(DAV_PORT), DAV_SHARED, DAV_BOOK, DAV_SHARED, DAV_CAL))
-    return render("dav", "".join(blocks))
+    return render("dav", "".join(blocks), script)
 
 
 def page_phone(info=""):
@@ -3571,7 +3622,8 @@ class Handler(BaseHTTPRequestHandler):
                 '<p class="ok">Přihlášení pro synchronizační aplikaci: '
                 'uživatelské jméno <span class="mono">%s</span>, heslo '
                 '<span class="mono">%s</span> — heslo se ukáže jen teď, zapiš '
-                "si ho.</p>" % (esc(name), esc(password))))
+                "si ho, nebo rovnou naskenuj kód níž.</p>" % (esc(name), esc(password)),
+                login=(name, password)))
         if self.path == "/net/access":
             level = form.get("value", "")
             if level not in ACCESS_LEVELS:

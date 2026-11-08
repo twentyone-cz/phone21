@@ -625,10 +625,12 @@ urllib.request.urlopen('http://127.0.0.1:5555/.web/', timeout=3)" 2>/dev/null &&
   return 1
 }
 dstep "úložiště kontaktů nastartuje a odpovídá" dav_start_check
-dstep "úložiště odpovídá i na dřívějším portu" \
+dstep "úložiště neposlouchá na dřívějším portu 5232" \
   docker exec "$DAV" python3 -c "
-import urllib.request
-urllib.request.urlopen('http://127.0.0.1:5232/.web/', timeout=3)"
+import socket
+s = socket.socket()
+s.settimeout(3)
+raise SystemExit(0 if s.connect_ex(('127.0.0.1', 5232)) else 'port 5232 pořád poslouchá')"
 dstep "úložiště běží pod nobody (65534)" \
   docker exec "$DAV" sh -c 'grep -q "Uid:.*65534" /proc/1/status || test "$(id -u)" = 65534'
 dav_auth_check() {
@@ -691,6 +693,13 @@ uid, card = mod.split_vcards("BEGIN:VCARD\nVERSION:2.1\nN:A;B;;;\n"
                              "ORG:Firma, s.r.o.\nEND:VCARD\n")[0]
 assert "p21c1.TEL:+420111" in card and "p21c1.X-ABLabel:Domů" in card, card
 assert "ORG:Firma\\, s.r.o." in card and "X-CUSTOM" not in card, card
+# QR pro DAVx⁵: caldav:// (= http), jméno a heslo v odkazu, privátní síť první
+mod.dav_urls = lambda: [("domácí síť", "http://192.168.0.5:5555/"),
+                        ("privátní síť", "http://100.64.0.1:5555/")]
+links = mod.dav_login_links("telefon", "ABCD-EFGH")
+assert links[0] == ("privátní síť", "caldav://telefon:ABCD-EFGH@100.64.0.1:5555/"), links
+html, js = mod.dav_login_block("telefon", "ABCD-EFGH")
+assert html.count('class="qr"') == 2 and js.count("new QRCode") == 2, (html, js)
 # ZIP z Google Kalendáře: jen .ics a .vcf, bez smetí z macOS
 import io, zipfile
 buf = io.BytesIO()

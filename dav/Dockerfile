@@ -7,5 +7,5 @@ COPY rights /etc/radicale/rights
 COPY entrypoint.py /opt/phone21-dav/entrypoint.py
 COPY phone21_auth.py /opt/phone21-dav/phone21_auth.py
 ENV PYTHONPATH=/opt/phone21-dav
-EXPOSE 5555 5232
+EXPOSE 5555
 CMD ["python3", "/opt/phone21-dav/entrypoint.py"]

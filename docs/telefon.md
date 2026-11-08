@@ -103,9 +103,15 @@ importu ověř, jestli se do exportu dostanou, se liší.
 
 **Android**
 
-1. V ovládání přidej zařízení (třeba `telefon`) a zapiš si heslo.
-2. Nainstaluj **DAVx⁵** (F-Droid) → přidej účet volbou *Přihlásit se pomocí
-   URL a uživatelského jména*. Jako adresu vlož tu, kterou ovládání vypisuje
+1. Nainstaluj **DAVx⁵** (F-Droid).
+2. V ovládání přidej zařízení (třeba `telefon`). Ovládání ukáže **QR kód** —
+   naskenuj ho telefonem a otevře se DAVx⁵ s vyplněnou adresou, jménem
+   i heslem; potvrď přihlášení pomocí URL, *Přihlásit* a zapni **Kontakty**
+   i **Kalendář**. Kódy jsou dva, podle adresy (viz níž). Na telefonu, kde
+   máš ovládání otevřené, stačí klepnout na *Otevřít v DAVx⁵*.
+
+   Ručně: v DAVx⁵ přidej účet volbou *Přihlásit se pomocí URL
+   a uživatelského jména*. Jako adresu vlož tu, kterou ovládání vypisuje
    na záložce Kontakty a kalendář:
    - v profilu, kde běží aplikace Phone21, adresu pro **privátní síť**, která
      funguje doma i venku;
@@ -191,6 +197,11 @@ vlastní přihlášení a vlastní DAVx⁵.** Obsah je všude stejný.
   `.ics`) a soubory ulož jinam.
 - **Ztracené nebo prodané zařízení:** v ovládání ho smaž. Ostatní zařízení
   si ničeho nevšimnou. Na vyřazeném zařízení smaž i účet v DAVx⁵.
+- **Přechod ze staršího portu 5232 (do 0.9.38):** od 0.9.39 úložiště na
+  5232 neposlouchá. DAVx⁵ adresu existujícího účtu změnit neumí, proto:
+  v ovládání dej u zařízení *Nové heslo*, naskenuj QR kód (vznikne nový účet
+  v DAVx⁵ se správnou adresou) a starý účet v DAVx⁵ smaž. Kontakty se ze
+  společného adresáře stáhnou znovu.
 - **Přechod z verze před 0.9.35:** dřív měl každý účet vlastní adresář.
   Aktualizace obsah všech účtů jednou sama přelije do společného adresáře
   a kalendáře, původní data přitom zůstanou. Dosavadní jména a hesla

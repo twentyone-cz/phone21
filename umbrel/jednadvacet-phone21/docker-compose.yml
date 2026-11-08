@@ -725,7 +725,6 @@ services:
         max-file: "3"
     ports:
       - "5555:5555"
-      - "5232:5232"          # zařízení nastavená před 0.9.38
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5555/.web/', timeout=5)"]
       interval: 30s
