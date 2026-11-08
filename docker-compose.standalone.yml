@@ -105,9 +105,9 @@ services:
       AMI_HOST: host.docker.internal
       AMI_SECRETS_FILE: /var/lib/phone21/secrets.env
       TS_DIR: /var/lib/phone21/ts
-      DAV_URL: http://dav:5232
+      DAV_URL: http://dav:5555
       DAV_DIR: /var/lib/phone21-dav
-      DAV_PORT: "5232"
+      DAV_PORT: "5555"
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
       # adresa koordinátoru privátní sítě: ovládání si přes ni samo vyžádá
       # klíč brány (tlačítko „Připojit bránu“) a klíč pro telefon do QR
@@ -728,7 +728,8 @@ services:
         max-size: "10m"
         max-file: "3"
     ports:
-      - "5232:5232"
+      - "5555:5555"
+      - "5232:5232"          # zařízení nastavená před 0.9.38
     environment:
       TZ: ${TZ:-Europe/Prague}
     volumes:

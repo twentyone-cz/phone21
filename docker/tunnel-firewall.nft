@@ -6,7 +6,7 @@
 define TUN_IF    = "tailscale0"
 define SIP_PORT  = 5060
 define RTP_PORTS = 10000-10100
-define TUN_TCP   = { 8090, 8091, 5232 }
+define TUN_TCP   = { 8090, 8091, 5555, 5232 }
 
 # Idempotence: tabulku vyrob prázdnou, smaž a nadefinuj.
 table inet phone21 {}

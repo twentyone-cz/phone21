@@ -136,15 +136,15 @@ importu ověř, jestli se do exportu dostanou, se liší.
 
 **iPhone:** Nastavení → Aplikace → Kontakty → Účty → Přidat účet → Jiné →
 Přidat účet CardDAV. Server je adresa pro domácí síť z ovládání bez
-`http://`, v *Upřesnit* vypni SSL a nastav port 5232. Kalendář se nastaví
+`http://`, v *Upřesnit* vypni SSL a nastav port 5555. Kalendář se nastaví
 stejně, jen přes CalDAV. Přesné názvy položek se mezi verzemi iOS liší.
 iPhone se synchronizuje jen v domácí síti.
 
 **Počítač (Thunderbird):** nový adresář typu *CardDAV* a nový kalendář
 *v síti*. Adresa je z ovládání, jméno a heslo zařízení. Kdyby Thunderbird
 adresář nebo kalendář sám nenašel, zadej přímo
-`http://<adresa>:5232/spolecne/kontakty/` a
-`http://<adresa>:5232/spolecne/kalendar/`.
+`http://<adresa>:5555/spolecne/kontakty/` a
+`http://<adresa>:5555/spolecne/kalendar/`.
 Thunderbird umí naimportovat soubor `.ics` rovnou do kalendáře z miniserveru,
 hodí se to jako alternativa ke kroku 3.
 

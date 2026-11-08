@@ -48,7 +48,7 @@ TS_DIR = os.environ.get("TS_DIR", "")
 # --- Kontakty a kalendář (server pro synchronizaci) --------------------------
 DAV_URL = os.environ.get("DAV_URL", "")
 DAV_DIR = os.environ.get("DAV_DIR", "")
-DAV_PORT = os.environ.get("DAV_PORT", "5232")
+DAV_PORT = os.environ.get("DAV_PORT", "5555")
 DAV_ADMIN = "_phone21"
 DAV_BOOK = "kontakty"
 DAV_CAL = "kalendar"

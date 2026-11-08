@@ -100,9 +100,9 @@ services:
       # si ho přečte ze sdíleného souboru:
       AMI_SECRETS_FILE: /var/lib/phone21/secrets.env
       TS_DIR: /var/lib/phone21/ts
-      DAV_URL: http://dav:5232
+      DAV_URL: http://dav:5555
       DAV_DIR: /var/lib/phone21-dav
-      DAV_PORT: "5232"
+      DAV_PORT: "5555"
       ACCOUNT_LABEL: ${ACCOUNT_LABEL:-myGSM}   # název účtu v telefonu
       UI_MODE: gui             # spotřebitelský dashboard (Docker default = expert)
       NET_DASHBOARD_URL: ${NET_DASHBOARD_URL:-https://phone.twentyone.cz/dashboard}
@@ -724,9 +724,10 @@ services:
         max-size: "10m"
         max-file: "3"
     ports:
-      - "5232:5232"
+      - "5555:5555"
+      - "5232:5232"          # zařízení nastavená před 0.9.38
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5232/.web/', timeout=5)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5555/.web/', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

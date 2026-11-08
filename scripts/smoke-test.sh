@@ -619,12 +619,16 @@ dav_start_check() {
   for _ in $(seq 1 20); do
     docker exec "$DAV" python3 -c "
 import urllib.request
-urllib.request.urlopen('http://127.0.0.1:5232/.web/', timeout=3)" 2>/dev/null && return 0
+urllib.request.urlopen('http://127.0.0.1:5555/.web/', timeout=3)" 2>/dev/null && return 0
     sleep 1
   done
   return 1
 }
 dstep "úložiště kontaktů nastartuje a odpovídá" dav_start_check
+dstep "úložiště odpovídá i na dřívějším portu" \
+  docker exec "$DAV" python3 -c "
+import urllib.request
+urllib.request.urlopen('http://127.0.0.1:5232/.web/', timeout=3)"
 dstep "úložiště běží pod nobody (65534)" \
   docker exec "$DAV" sh -c 'grep -q "Uid:.*65534" /proc/1/status || test "$(id -u)" = 65534'
 dav_auth_check() {
@@ -632,7 +636,7 @@ dav_auth_check() {
 import urllib.request, urllib.error
 try:
     urllib.request.urlopen(urllib.request.Request(
-        'http://127.0.0.1:5232/', method='PROPFIND'), timeout=5)
+        'http://127.0.0.1:5555/', method='PROPFIND'), timeout=5)
 except urllib.error.HTTPError as e:
     raise SystemExit(0 if e.code == 401 else 'ocekavano 401, prislo %s' % e.code)
 raise SystemExit('pozadavek bez hesla prosel')
@@ -704,13 +708,13 @@ step "dělení kontaktů a kalendáře funguje" dav_split_check
 # Zařízení se přihlašují vlastním heslem a všechna vidí společný adresář.
 dav_shared_check() {
   docker cp webui/app.py "$DAV":/tmp/wapp.py >/dev/null || return 1
-  docker exec -u 65534 -e DAV_URL=http://127.0.0.1:5232 -e DAV_DIR=/data/config \
+  docker exec -u 65534 -e DAV_URL=http://127.0.0.1:5555 -e DAV_DIR=/data/config \
     -e PHONE21_DATA=/tmp/p21 -e WEBUI_STATE=/tmp/p21/webui -i "$DAV" python3 - <<'PY'
 import base64, sys, urllib.request, urllib.error
 sys.path.insert(0, "/tmp")
 import wapp
 def req(method, path, who, body=None, headers=None):
-    r = urllib.request.Request("http://127.0.0.1:5232" + path, data=body, method=method)
+    r = urllib.request.Request("http://127.0.0.1:5555" + path, data=body, method=method)
     r.add_header("Authorization", "Basic " + base64.b64encode(("%s:%s" % who).encode()).decode())
     for k, v in (headers or {}).items():
         r.add_header(k, v)
@@ -769,7 +773,7 @@ dstep "zařízení sdílí společný adresář, smazané se nepřihlásí" dav_
 
 # Dřívější účty (každý s vlastním adresářem) se jednorázově přelijí do společného.
 dav_migrate_check() {
-  docker exec -u 65534 -e DAV_URL=http://127.0.0.1:5232 -e DAV_DIR=/data/config \
+  docker exec -u 65534 -e DAV_URL=http://127.0.0.1:5555 -e DAV_DIR=/data/config \
     -e PHONE21_DATA=/tmp/p21 -e WEBUI_STATE=/tmp/p21/webui -i "$DAV" python3 - <<'PY'
 import sys
 sys.path.insert(0, "/tmp")
