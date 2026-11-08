@@ -18,7 +18,7 @@ services:
       APP_PORT: 8090
 
   pbx:
-    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.37@sha256:d82f41476fca41de4d98695f104ef80d25738131a8f3f1445eb835d632ebcf10
+    image: ghcr.io/twentyone-cz/phone21-pbx:0.9.38@sha256:f3ebedce8b8db633acb379b12c8688ea3be47248d3e09d1717a2267af4d6d50c
     restart: on-failure
     network_mode: host            # rozsah portů hovorů + adresa v privátní síti
     # strop logu: max 10 MB × 3 soubory (bez rotace by log zaplnil disk)
@@ -76,7 +76,7 @@ services:
     # chrání ho jednorázový token
     ports:
       - "8091:8091"
-    image: ghcr.io/twentyone-cz/phone21-ui:0.9.37@sha256:2931e19cd4406e5c9012e2a268c7dc18aa6f9e3e19659a94dffb65dae67b906d
+    image: ghcr.io/twentyone-cz/phone21-ui:0.9.38@sha256:ce61b91d05cd002b724c2591255df091bd01a3c4d6de6a811b6f5c52aae47510
     restart: on-failure
     # strop logu: max 10 MB × 3 soubory
     logging:
@@ -715,7 +715,7 @@ services:
 
   # Kontakty a kalendář (server pro synchronizaci zařízení).
   dav:
-    image: ghcr.io/twentyone-cz/phone21-dav:0.9.37@sha256:3f8125ec21a42489458d95b59891e01151e64e0f11c16fac1914348ee266b2dd
+    image: ghcr.io/twentyone-cz/phone21-dav:0.9.38@sha256:6153de634efaae219dc2c1d9939b192cd09bad16027913e702fe40e1a7a71ce2
     restart: on-failure
     # strop logu: max 10 MB × 3 soubory
     logging:
