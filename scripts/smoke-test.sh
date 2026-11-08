@@ -681,6 +681,12 @@ assert fn_of("BEGIN:VCARD\nVERSION:3.0\nFN:Beze zmeny\nTEL:+420333\nEND:VCARD") 
 uid, card = mod.split_vcards("BEGIN:VCARD\nVERSION:2.1\nN:F;X;;;\n"
                              "PHOTO;ENCODING=BASE64;JPEG:/9j/4AAQ\n  SkZJRg==\n\nEND:VCARD\n")[0]
 assert "PHOTO;TYPE=JPEG;ENCODING=b:/9j/4AAQSkZJRg==" in card and "BASE64" not in card, card
+# vlastní štítek čísla z exportu telefonu a čárka ve firmě (tvar 2.1)
+uid, card = mod.split_vcards("BEGIN:VCARD\nVERSION:2.1\nN:A;B;;;\n"
+                             "TEL;X-CUSTOM(CHARSET=UTF-8,ENCODING=QUOTED-PRINTABLE,=44=6F=6D=C5=AF):+420111\n"
+                             "ORG:Firma, s.r.o.\nEND:VCARD\n")[0]
+assert "p21c1.TEL:+420111" in card and "p21c1.X-ABLabel:Domů" in card, card
+assert "ORG:Firma\\, s.r.o." in card and "X-CUSTOM" not in card, card
 # ZIP z Google Kalendáře: jen .ics a .vcf, bez smetí z macOS
 import io, zipfile
 buf = io.BytesIO()
@@ -745,6 +751,12 @@ raw = ("BEGIN:VCARD\r\nVERSION:2.1\r\nN:Foto;Petr;;;\r\nPHOTO;ENCODING=BASE64;JP
        + "".join("  %s\r\n" % b64[i:i + 72] for i in range(72, len(b64), 72)) + "\r\nEND:VCARD\r\n")
 uid, photo = wapp.split_vcards(raw)[0]
 st, _ = req("PUT", "/spolecne/kontakty/%s.vcf" % uid, one, photo.encode(), {"Content-Type": "text/vcard"})
+assert st in (201, 204), st
+# vlastní štítek a čárka ve firmě z exportu ve tvaru 2.1 úložiště přijme
+uid, odd = wapp.split_vcards("BEGIN:VCARD\r\nVERSION:2.1\r\nN:A;B;;;\r\n"
+    "TEL;X-CUSTOM(CHARSET=UTF-8,ENCODING=QUOTED-PRINTABLE,=44=6F=6D=C5=AF):+420111\r\n"
+    "ORG:Firma, s.r.o.\r\nEND:VCARD\r\n")[0]
+st, _ = req("PUT", "/spolecne/kontakty/%s.vcf" % uid, one, odd.encode(), {"Content-Type": "text/vcard"})
 assert st in (201, 204), st
 # událost s kredity projde validací úložiště a nese dvě připomínky
 ics = wapp.credit_event_ics(2000000000)

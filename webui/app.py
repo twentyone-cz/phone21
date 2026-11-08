@@ -1829,6 +1829,45 @@ def _vcard_fix_binary(lines):
     return out
 
 
+# Další zvláštnosti exportu z telefonů, kvůli kterým úložiště vizitku odmítne:
+# vlastní štítek čísla zapsaný jako parametr TEL;X-CUSTOM(CHARSET=…,ENCODING=
+# QUOTED-PRINTABLE,<štítek>) — převede se na standardní dvojici itemN.TEL
+# + itemN.X-ABLabel; a ve tvaru 2.1 čárka ve firmě (ORG), kterou 2.1
+# neescapuje.
+_VCARD_CUSTOM_RE = re.compile(
+    r"^(?P<name>[A-Za-z0-9-]+)(?P<pre>(?:;[^:;()]*)*?);X-CUSTOM\((?P<inner>[^)]*)\)"
+    r"(?P<post>(?:;[^:]*)?):(?P<value>.*)$", re.I)
+
+
+def _vcard_fix_android(lines):
+    import quopri
+    v21 = any(ln.strip().upper() == "VERSION:2.1" for ln in lines)
+    out = []
+    n = 0
+    for line in lines:
+        m = None if line[:1] in (" ", "\t") else _VCARD_CUSTOM_RE.match(line)
+        if m:
+            parts = m.group("inner").split(",")
+            label, params = parts[-1], [x.strip().upper() for x in parts[:-1]]
+            charset = next((x[8:] for x in params if x.startswith("CHARSET=")), "UTF-8")
+            if "ENCODING=QUOTED-PRINTABLE" in params:
+                try:
+                    label = quopri.decodestring(label.encode()).decode(charset, "replace")
+                except LookupError:
+                    label = quopri.decodestring(label.encode()).decode("utf-8", "replace")
+            n += 1
+            out.append("p21c%d.%s%s%s:%s" % (n, m.group("name"), m.group("pre"),
+                                             m.group("post"), m.group("value")))
+            out.append("p21c%d.X-ABLabel:%s" % (n, _vcard_escape(label.strip())))
+            continue
+        if v21 and line[:1] not in (" ", "\t") and \
+                line.split(":", 1)[0].split(";", 1)[0].strip().upper() == "ORG" and ":" in line:
+            head, value = line.split(":", 1)
+            line = head + ":" + re.sub(r"(?<!\\),", r"\\,", value)
+        out.append(line)
+    return out
+
+
 def split_vcards(text):
     """Rozdělí .vcf na jednotlivé vizitky; chybějící UID doplní."""
     out = []
@@ -1839,7 +1878,7 @@ def split_vcards(text):
         elif current:
             current.append(line)
             if line.strip().upper().startswith("END:VCARD"):
-                current = _vcard_fix_binary(current)
+                current = _vcard_fix_binary(_vcard_fix_android(current))
                 # vizitka bez jména je pro úložiště neplatná — doplní se
                 # ze jména, firmy nebo čísla, ať se kontakt neztratí
                 if not any(ln.split(";", 1)[0].split(":", 1)[0].strip().upper() == "FN"
