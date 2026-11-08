@@ -74,8 +74,8 @@ sluč duplicity a sjednoť čísla na tvar **+420…**. Pak vyber jednu z cest:
    celý tvůj adresář.
 2. Ovládání → **Kontakty a kalendář** → v části **Import ze starého
    telefonu** nahraj `.vcf`. Počkej, až import ukáže *hotovo*, a pak nahraj
-   postupně každý `.ics`. Všechno se uloží do společného adresáře
-   a kalendáře.
+   kalendář — ZIP z Google Kalendáře jde nahrát rovnou, bez rozbalování.
+   Všechno se uloží do společného adresáře a kalendáře.
 3. Zkontroluj souhrn *uloženo / přeskočeno / chyb*. Všechny kalendáře
    z Googlu skončí v **jednom kalendáři** a barvy kalendářů se nepřenesou.
    Připomínky událostí se přenesou s nimi.
@@ -112,8 +112,10 @@ importu ověř, jestli se do exportu dostanou, se liší.
    - jinde (vedlejší profil, tablet bez aplikace Phone21) adresu pro
      **domácí síť**, viz 1C.
 
-   Doplň jméno zařízení a jeho heslo, potvrď nešifrované spojení a zapni
-   adresář **Kontakty** i **Kalendář**.
+   **Uživatelské jméno** je jméno zařízení z kroku 1 (`telefon`), **heslo**
+   to, které ovládání při přidání ukázalo (zapomenuté nahradíš volbou *Nové
+   heslo*). Potvrď nešifrované spojení a zapni adresář **Kontakty**
+   i **Kalendář**.
 3. Aby se DAVx⁵ dostal k miniserveru i mimo domov, nastav v aplikaci Phone21
    na obrazovce **Konexe** jednu z těchto voleb:
    - **Přístup na miniserver**: do privátní sítě smí všechny aplikace;

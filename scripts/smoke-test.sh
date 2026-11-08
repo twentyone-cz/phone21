@@ -677,6 +677,20 @@ def fn_of(raw):
 assert fn_of("BEGIN:VCARD\nVERSION:3.0\nN:Novak;Petr;;;\nTEL:+420111\nEND:VCARD") == "FN:Petr Novak"
 assert fn_of("BEGIN:VCARD\nVERSION:3.0\nTEL:+420222\nEND:VCARD") == "FN:+420222"
 assert fn_of("BEGIN:VCARD\nVERSION:3.0\nFN:Beze zmeny\nTEL:+420333\nEND:VCARD") == "FN:Beze zmeny"
+# fotka ve tvaru vCard 2.1 (export Androidu) se přepíše do tvaru, který úložiště bere
+uid, card = mod.split_vcards("BEGIN:VCARD\nVERSION:2.1\nN:F;X;;;\n"
+                             "PHOTO;ENCODING=BASE64;JPEG:/9j/4AAQ\n  SkZJRg==\n\nEND:VCARD\n")[0]
+assert "PHOTO;TYPE=JPEG;ENCODING=b:/9j/4AAQSkZJRg==" in card and "BASE64" not in card, card
+# ZIP z Google Kalendáře: jen .ics a .vcf, bez smetí z macOS
+import io, zipfile
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, "w") as z:
+    z.writestr("a@example.com.ics", "BEGIN:VCALENDAR\nEND:VCALENDAR\n")
+    z.writestr("__MACOSX/._a.ics", "x")
+    z.writestr("readme.txt", "x")
+files, err = mod.dav_zip_members(buf.getvalue())
+assert err == "" and len(files) == 1, (files, err)
+assert mod.dav_zip_members(b"PK\x03\x04nesmysl")[1]
 PY
 }
 step "dělení kontaktů a kalendáře funguje" dav_split_check
@@ -724,6 +738,14 @@ st, _ = req("PUT", "/spolecne/kontakty/", one, card, {"Content-Type": "text/vcar
 assert st in (401, 403, 405, 409), st
 st, _ = req("GET", "/spolecne/kontakty/k1.vcf", one)
 assert st == 200, st
+# kontakt s fotkou z exportu ve tvaru 2.1 úložiště přijme
+import base64
+b64 = base64.b64encode(bytes(range(256)) * 4).decode()
+raw = ("BEGIN:VCARD\r\nVERSION:2.1\r\nN:Foto;Petr;;;\r\nPHOTO;ENCODING=BASE64;JPEG:" + b64[:72] + "\r\n"
+       + "".join("  %s\r\n" % b64[i:i + 72] for i in range(72, len(b64), 72)) + "\r\nEND:VCARD\r\n")
+uid, photo = wapp.split_vcards(raw)[0]
+st, _ = req("PUT", "/spolecne/kontakty/%s.vcf" % uid, one, photo.encode(), {"Content-Type": "text/vcard"})
+assert st in (201, 204), st
 # událost s kredity projde validací úložiště a nese dvě připomínky
 ics = wapp.credit_event_ics(2000000000)
 assert ics.count("BEGIN:VALARM") == 2

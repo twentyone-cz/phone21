@@ -1792,6 +1792,43 @@ def _vcard_escape(value):
     return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
 
 
+# Binární hodnoty ve tvaru vCard 2.1 (fotka z exportu Androidu:
+# PHOTO;ENCODING=BASE64;JPEG: a pokračovací řádky) úložiště nepřečte — vizitku
+# odmítne celou. Přepíšou se do tvaru 3.0 (ENCODING=b;TYPE=JPEG).
+_VCARD_BIN_TYPES = {"JPEG": "JPEG", "JPG": "JPEG", "PNG": "PNG", "GIF": "GIF",
+                    "BMP": "BMP", "TIFF": "TIFF", "WAV": "WAV", "PGP": "PGP",
+                    "X509": "X509"}
+
+
+def _vcard_fix_binary(lines):
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        head, sep, value = line.partition(":")
+        params = head.split(";")
+        if (not sep or line[:1] in (" ", "\t") or not any(
+                p.strip().upper() in ("ENCODING=BASE64", "BASE64") for p in params[1:])):
+            out.append(line)
+            i += 1
+            continue
+        data = [value.strip()]
+        i += 1
+        # pokračování (odsazené řádky) a prázdný řádek, kterým 2.1 data končí
+        while i < len(lines) and (lines[i][:1] in (" ", "\t") or not lines[i].strip()):
+            data.append(lines[i].strip())
+            i += 1
+        keep = [params[0]]
+        for p in params[1:]:
+            up = p.strip().upper()
+            if up in ("ENCODING=BASE64", "BASE64"):
+                continue
+            keep.append("TYPE=" + _VCARD_BIN_TYPES[up] if up in _VCARD_BIN_TYPES else p)
+        prop = ";".join(keep + ["ENCODING=b"]) + ":" + "".join(data)
+        out.append("\r\n ".join(prop[k:k + 74] for k in range(0, len(prop), 74)))
+    return out
+
+
 def split_vcards(text):
     """Rozdělí .vcf na jednotlivé vizitky; chybějící UID doplní."""
     out = []
@@ -1802,6 +1839,7 @@ def split_vcards(text):
         elif current:
             current.append(line)
             if line.strip().upper().startswith("END:VCARD"):
+                current = _vcard_fix_binary(current)
                 # vizitka bez jména je pro úložiště neplatná — doplní se
                 # ze jména, firmy nebo čísla, ať se kontakt neztratí
                 if not any(ln.split(";", 1)[0].split(":", 1)[0].strip().upper() == "FN"
@@ -2009,9 +2047,18 @@ def credit_loop():
         time.sleep(CREDIT_TICK)
 
 
-def dav_import_run(kind, items):
+def dav_import_run(batches):
     """Položky se ukládají po jedné do společného adresáře nebo kalendáře;
-    existující UID se přeskočí."""
+    existující UID se přeskočí. batches = [(druh, položky), …]."""
+    for kind, items in batches:
+        _dav_import_batch(kind, items)
+    with _dav_lock:
+        _dav_import["running"] = False
+    audit("dav import hotovo done=%d skip=%d fail=%d" % (
+        _dav_import["done"], _dav_import["skipped"], _dav_import["failed"]))
+
+
+def _dav_import_batch(kind, items):
     collection = DAV_BOOK if kind == "vcard" else DAV_CAL
     ctype = "text/vcard; charset=utf-8" if kind == "vcard" \
         else "text/calendar; charset=utf-8"
@@ -2025,7 +2072,8 @@ def dav_import_run(kind, items):
         with _dav_lock:
             if status in (201, 204):
                 _dav_import["done"] += 1
-            elif status == 412:
+            elif status in (409, 412):
+                # 412 = stejný název, 409 = stejné UID už je pod jiným názvem
                 _dav_import["skipped"] += 1
             else:
                 _dav_import["failed"] += 1
@@ -2035,43 +2083,83 @@ def dav_import_run(kind, items):
                     _dav_import["errors"].append(
                         "%s → %s %s" % (uid[:40], status, detail))
                 audit("dav import chyba %s status=%s %s" % (uid[:40], status, detail))
-    with _dav_lock:
-        _dav_import["running"] = False
-    audit("dav import %s hotovo done=%d skip=%d fail=%d" % (
-        kind, _dav_import["done"], _dav_import["skipped"], _dav_import["failed"]))
+
+
+DAV_ZIP_MAX_FILES = 200
+DAV_ZIP_MAX_BYTES = 50 * 1024 * 1024
+
+
+def dav_zip_members(raw):
+    """Obsah souborů .vcf a .ics z archivu (export Google Kalendáře je ZIP
+    s jedním .ics za každý kalendář) → (seznam bajtů, chyba)."""
+    import io
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+        infos = [i for i in zf.infolist()
+                 if not i.is_dir() and not i.filename.startswith("__MACOSX/")
+                 and i.filename.lower().endswith((".vcf", ".ics"))]
+        if not infos:
+            return [], "[OVL-E27] V archivu není žádný soubor .vcf ani .ics."
+        if len(infos) > DAV_ZIP_MAX_FILES or \
+                sum(i.file_size for i in infos) > DAV_ZIP_MAX_BYTES:
+            return [], "[OVL-E28] Archiv je moc velký (limit %d souborů, %d MB po rozbalení)." % (
+                DAV_ZIP_MAX_FILES, DAV_ZIP_MAX_BYTES // (1024 * 1024))
+        return [zf.read(i) for i in infos], ""
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, RuntimeError, ValueError):
+        return [], "[OVL-E27] Archiv nejde přečíst."
+
+
+def _dav_decode(raw):
+    for enc in ("utf-8-sig", "cp1250"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return None
+
+
+DAV_KIND_LABEL = {"vcard": "kontakty", "ical": "kalendář", "mix": "kontakty a kalendář"}
 
 
 def dav_import_start(raw):
-    """Rozpozná druh souboru a spustí import na pozadí."""
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        try:
-            text = raw.decode("cp1250")
-        except UnicodeDecodeError:
-            return "[OVL-E27] Soubor není v čitelném kódování."
-    upper = text.upper()
-    if "BEGIN:VCARD" in upper:
-        kind, items = "vcard", split_vcards(text)
-    elif "BEGIN:VCALENDAR" in upper:
-        kind, items = "ical", split_ics(text)
+    """Rozpozná druh souboru (i ZIP s více soubory) a spustí import na pozadí."""
+    if raw[:4] == b"PK\x03\x04":
+        files, err = dav_zip_members(raw)
+        if err:
+            return err
     else:
-        return "[OVL-E27] Tohle není soubor s kontakty ani s kalendářem."
-    if not items:
+        files = [raw]
+    cards, events = [], []
+    for data in files:
+        text = _dav_decode(data)
+        if text is None:
+            return "[OVL-E27] Soubor není v čitelném kódování."
+        upper = text.upper()
+        if "BEGIN:VCARD" in upper:
+            cards += split_vcards(text)
+        elif "BEGIN:VCALENDAR" in upper:
+            events += split_ics(text)
+        elif len(files) == 1:
+            return "[OVL-E27] Tohle není soubor s kontakty ani s kalendářem."
+    batches = [(k, i) for k, i in (("vcard", cards), ("ical", events)) if i]
+    if not batches:
         return "[OVL-E27] V souboru není žádná položka."
+    kind = batches[0][0] if len(batches) == 1 else "mix"
+    total = sum(len(i) for _, i in batches)
     with _dav_lock:
         if _dav_import["running"]:
             return "[OVL-E29] Import už běží."
         _dav_import.update({"running": True, "done": 0, "skipped": 0,
-                            "failed": 0, "total": len(items), "errors": [],
+                            "failed": 0, "total": total, "errors": [],
                             "kind": kind})
     ok, detail = dav_ensure_collections(DAV_SHARED)
     if not ok:
         with _dav_lock:
             _dav_import["running"] = False
         return "[OVL-E26] Úložiště teď nejde použít: %s" % esc(detail)
-    audit("dav import start %s %d položek" % (kind, len(items)))
-    threading.Thread(target=dav_import_run, args=(kind, items),
+    audit("dav import start %s %d položek ze %d souborů" % (kind, total, len(files)))
+    threading.Thread(target=dav_import_run, args=(batches,),
                      daemon=True).start()
     return ""
 
@@ -2140,6 +2228,10 @@ td,th { text-align:left; padding:.55rem .6rem; border-bottom:1px solid var(--lin
 th { color:var(--muted); font-size:.75rem; text-transform:uppercase;
   letter-spacing:.05em }
 form.inline { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin:.8rem 0 }
+td.mid { vertical-align:middle }
+.acts { display:flex; gap:.5rem; flex-wrap:wrap; justify-content:flex-end }
+.acts form { margin:0 }
+.acts button { padding:.4rem .85rem; font-size:.88rem }
 input,select,textarea { background:var(--bg); color:var(--fg); border:1px solid var(--line);
   border-radius:10px; padding:.6rem .75rem; font:inherit; font-size:.95rem }
 input:focus,select:focus { outline:2px solid var(--acc); outline-offset:1px }
@@ -2723,15 +2815,17 @@ def page_net(info=""):
 
 def _dav_user_row(name):
     return (
-        "<tr><td><b>%s</b></td><td>"
-        '<form class="inline" method="post" action="%s">'
+        '<tr><td class="mid"><b>%s</b></td><td><div class="acts">'
+        '<form method="post" action="%s">'
         '<input type="hidden" name="user" value="%s">'
-        "<button>Nové heslo</button></form> "
-        '<form class="inline" method="post" action="%s">'
+        '<button class="ghost">Nové heslo</button></form>'
+        '<form method="post" action="%s" '
+        "onsubmit=\"return confirm('Smazat zařízení %s? Kontakty a kalendář "
+        "zůstanou, jen se z něj už nikdo nepřihlásí.')\">"
         '<input type="hidden" name="user" value="%s">'
-        '<button class="ghost">Smazat</button></form></td></tr>'
+        '<button class="ghost">Smazat</button></form></div></td></tr>'
     ) % (esc(name), u("/dav/user/pass"), esc(name),
-         u("/dav/user/del"), esc(name))
+         u("/dav/user/del"), esc(name), esc(name))
 
 
 def page_dav(info=""):
@@ -2784,7 +2878,7 @@ def page_dav(info=""):
             '<p class="%s">Import (%s): %s — uloženo %d, přeskočeno %d, '
             "chyb %d z %d.</p>%s"
             % ("warn" if imp["running"] else "ok",
-               "kontakty" if imp["kind"] == "vcard" else "kalendář",
+               DAV_KIND_LABEL.get(imp["kind"], "kalendář"),
                "probíhá" if imp["running"] else "hotovo",
                imp["done"], imp["skipped"], imp["failed"], imp["total"],
                ("<pre>%s</pre>" % esc("\n".join(imp["errors"])))
@@ -2793,9 +2887,10 @@ def page_dav(info=""):
             blocks.append('<meta http-equiv="refresh" content="3">')
     blocks.append(
         "<h2>Import ze starého telefonu</h2>"
-        "<p>Nahraj soubor <b>.vcf</b> (kontakty) nebo <b>.ics</b> (kalendář) — "
-        "uloží se do společného adresáře nebo kalendáře. Položky, které už na "
-        "miniserveru jsou, se přeskočí, import jde opakovat.</p>"
+        "<p>Nahraj soubor <b>.vcf</b> (kontakty), <b>.ics</b> (kalendář), nebo "
+        "rovnou <b>.zip</b> s exportem z Google Kalendáře — uloží se do "
+        "společného adresáře nebo kalendáře. Položky, které už na miniserveru "
+        "jsou, se přeskočí, import jde opakovat.</p>"
         '<form method="post" action="%s" enctype="multipart/form-data">'
         '<input type="file" name="file" required> '
         "<button>Nahrát</button></form>" % u("/dav/import"))
@@ -2808,7 +2903,8 @@ def page_dav(info=""):
         "<table><tr><th>odkud</th><th>adresa</th></tr>%s</table>"
         "<p><b>Android:</b> nainstaluj synchronizační aplikaci (DAVx⁵ "
         "z F-Droidu), přidej účet volbou <i>Přihlásit se pomocí URL a jména</i>, "
-        "vlož adresu výše, jméno zařízení a jeho heslo. Potvrď nešifrované "
+        "vlož adresu výše, jako uživatelské jméno jméno zařízení z tabulky "
+        "a jeho heslo. Potvrď nešifrované "
         "spojení v domácí síti a zapni <i>Kontakty</i> i <i>Kalendář</i>. "
         "V každém profilu telefonu zvlášť.</p>"
         "<p><b>iPhone:</b> Nastavení → Aplikace → Kontakty → Účty → Přidat "
@@ -3433,9 +3529,10 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self._html(page_dav('<p class="bad">%s</p>' % err))
             return self._html(page_dav(
-                '<p class="ok">Zařízení <b>%s</b>, heslo <span class="mono">%s'
-                "</span> — ukáže se jen teď, zapiš si ho.</p>"
-                % (esc(name), esc(password))))
+                '<p class="ok">Přihlášení pro synchronizační aplikaci: '
+                'uživatelské jméno <span class="mono">%s</span>, heslo '
+                '<span class="mono">%s</span> — heslo se ukáže jen teď, zapiš '
+                "si ho.</p>" % (esc(name), esc(password))))
         if self.path == "/net/access":
             level = form.get("value", "")
             if level not in ACCESS_LEVELS:
