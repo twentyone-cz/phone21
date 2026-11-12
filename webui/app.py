@@ -1360,6 +1360,7 @@ def prov_xml(domain, ts_url="", ts_key="", ts_exit_node=""):
     <entry name="username" overwrite="true">%(user)s</entry>
     <entry name="userid" overwrite="true">%(user)s</entry>
     <entry name="passwd" overwrite="true">%(passwd)s</entry>
+    <entry name="ha1" overwrite="true"></entry>
     <entry name="domain" overwrite="true">%(domain)s</entry>
   </section>
   <section name="video">
