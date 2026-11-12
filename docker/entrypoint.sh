@@ -555,30 +555,37 @@ rotate_loop() {
 }
 rotate_loop &
 
-# Nové heslo telefonu na žádost z ovládání (AstDB phone21/sip_rotate): zapíše
-# se do tajemství i do běžící konfigurace a stará přihlášení se zahodí.
+# Nové heslo telefonu na žádost z ovládání (AstDB phone21/sip_rotate = čas
+# žádosti): zapíše se do tajemství i do běžící konfigurace a stará přihlášení
+# se zahodí. Značka sip_rotate.done drží, že tahle žádost už heslo vyměnila.
 sip_rotate_loop() {
-  local req pass tmp
+  local req pass tmp cur
   while true; do
     sleep 5
     req="$(asterisk -rx 'database get phone21 sip_rotate' 2>/dev/null | awk '/^Value:/{print $2}')"
-    [[ -n "$req" ]] || continue
-    # shellcheck disable=SC1090
-    source "$SECRETS" 2>/dev/null || continue
-    pass="$(head -c 18 /dev/urandom | base64 | tr -d '/+=')"
-    [[ ${#pass} -ge 16 && -n "${AMI_PASSWORD:-}" ]] || continue
-    tmp="$SECRETS.tmp"
-    ( umask 077
-      printf 'SIP_USER=%s\nSIP_PASSWORD=%s\nAMI_PASSWORD=%s\n' \
-        "${SIP_USER:-softphone}" "$pass" "$AMI_PASSWORD" > "$tmp" ) || continue
-    chgrp 65534 "$tmp" 2>/dev/null || true
-    chmod 0640 "$tmp" 2>/dev/null || true
-    mv "$tmp" "$SECRETS" || continue
-    sed -i "s|^password=.*|password=$pass|" /etc/asterisk/pjsip.conf
-    asterisk -rx 'module reload res_pjsip.so' >/dev/null 2>&1 || true
-    asterisk -rx 'database deltree registrar contact' >/dev/null 2>&1 || true
-    asterisk -rx "database put phone21 sip_rotated $(date +%s)" >/dev/null 2>&1 || true
-    asterisk -rx 'database del phone21 sip_rotate' >/dev/null 2>&1 || true
+    [[ "$req" =~ ^[0-9]+$ ]] || continue
+    if [[ "$(cat "$DATA/sip_rotate.done" 2>/dev/null)" != "$req" ]]; then
+      pass="$(head -c 18 /dev/urandom | base64 | tr -d '/+=')"
+      [[ ${#pass} -ge 16 ]] || continue
+      tmp="$SECRETS.tmp"
+      ( umask 077; sed "s|^SIP_PASSWORD=.*|SIP_PASSWORD=$pass|" "$SECRETS" > "$tmp" ) || continue
+      grep -qx "SIP_PASSWORD=$pass" "$tmp" || { rm -f "$tmp"; continue; }
+      chgrp 65534 "$tmp" 2>/dev/null || true
+      chmod 0640 "$tmp" 2>/dev/null || true
+      mv "$tmp" "$SECRETS" || continue
+      printf '%s\n' "$req" > "$DATA/sip_rotate.done"
+    fi
+    cur="$(sed -n 's/^SIP_PASSWORD=//p' "$SECRETS" 2>/dev/null)"
+    [[ -n "$cur" ]] || continue
+    sed -i "s|^password=.*|password=$cur|" /etc/asterisk/pjsip.conf
+    if ! grep -qx "password=$cur" /etc/asterisk/pjsip.conf; then
+      log "POZOR: nové heslo telefonu se nepropsalo do konfigurace"
+      continue
+    fi
+    asterisk -rx 'database deltree registrar contact' >/dev/null 2>&1 || continue
+    asterisk -rx 'module reload res_pjsip.so' >/dev/null 2>&1 || continue
+    asterisk -rx "database put phone21 sip_rotated $(date +%s)" >/dev/null 2>&1 || continue
+    asterisk -rx 'database del phone21 sip_rotate' >/dev/null 2>&1 || continue
     log "heslo telefonu změněno na žádost z ovládání (stará přihlášení zrušena)"
   done
 }

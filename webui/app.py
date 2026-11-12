@@ -194,46 +194,48 @@ def normalize_msisdn(num, cc=None):
     return num
 
 
-_prov_tokens = {}          # token -> (expiruje, použito)
+_prov_tokens = {}          # token -> (expiruje, použito, přes privátní síť)
 _prov_lock = threading.Lock()
 
 # Poslední stažení konfigurace telefonem — záložka Telefon z něj ukáže,
 # jestli si telefon XML vzal a jestli k účtu dostal i klíč do sítě.
-_prov_last = {"t": 0.0, "err": "", "key": False}
+_prov_last = {"t": 0.0, "err": "", "key": False, "remote": False}
 
 
 _PROV_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # bez záměnitelných znaků
 
 
-def prov_new_token():
+def prov_new_token(remote=False):
     """Jednorázový token pro stažení konfigurace softphonem. Krátký záměrně
-    — když skener QR nefunguje, musí jít URL opsat z obrazovky."""
+    — když skener QR nefunguje, musí jít URL opsat z obrazovky. remote =
+    telefon si konfiguraci stáhne přes privátní síť, ve které už je."""
     import secrets as _s
     token = "".join(_s.choice(_PROV_ALPHABET) for _ in range(8))
     with _prov_lock:
         now = time.time()
-        for t, (exp, _used) in list(_prov_tokens.items()):
-            if exp < now:
+        for t, entry in list(_prov_tokens.items()):
+            if entry[0] < now:
                 del _prov_tokens[t]
-        _prov_tokens[token] = (now + PROV_TTL, 0.0)
+        _prov_tokens[token] = (now + PROV_TTL, 0.0, bool(remote))
     return token
 
 
 def prov_claim(token):
-    """Ověří token. Po prvním stažení zůstává platný ještě 90 s — fotoaparáty
-    a prohlížeče si odkaz z QR často „předstáhnou" pro náhled, čímž by čistě
-    jednorázový token spálily dřív, než si konfiguraci vezme aplikace."""
+    """Ověří token; vrací None (neplatný), jinak příznak „přes privátní síť".
+    Po prvním stažení zůstává platný ještě 90 s — fotoaparáty a prohlížeče
+    si odkaz z QR často „předstáhnou" pro náhled, čímž by čistě jednorázový
+    token spálily dřív, než si konfiguraci vezme aplikace."""
     with _prov_lock:
         entry = _prov_tokens.get(token)
         if not entry or entry[0] < time.time():
-            return False
-        expires, first_claim = entry
+            return None
+        expires, first_claim, remote = entry
         now = time.time()
         if first_claim and now - first_claim > 90:
-            return False
+            return None
         if not first_claim:
-            _prov_tokens[token] = (expires, now)
-        return True
+            _prov_tokens[token] = (expires, now, remote)
+        return remote
 
 
 PARTNER_URL = os.environ.get("COCKSCALE_URL", "https://cockscale.twentyone.cz")
@@ -2402,9 +2404,12 @@ def sip_rotated_at():
 
 
 def sip_rotate_pending():
-    """Čeká žádost o novou změnu hesla telefonu na ústřednu?"""
-    return any(ln.startswith("Value:")
-               for ln in cli("database get phone21 sip_rotate").splitlines())
+    """Čas nevyřízené žádosti o změnu hesla telefonu (epoch, 0 = žádná)."""
+    for ln in cli("database get phone21 sip_rotate").splitlines():
+        if ln.startswith("Value:"):
+            val = ln.split(":", 1)[1].strip()
+            return int(val) if val.isdigit() else 1
+    return 0
 
 
 def lan_ip():
@@ -3069,6 +3074,9 @@ def page_phone(info=""):
         elif _prov_last["key"]:
             blocks.append('<p><span class="ok">Telefon si konfiguraci stáhl '
                           "(naposledy %s), včetně klíče do sítě.</span></p>" % when)
+        elif _prov_last.get("remote"):
+            blocks.append('<p><span class="ok">Telefon si konfiguraci stáhl '
+                          "přes privátní síť (naposledy %s).</span></p>" % when)
         else:
             blocks.append('<p class="small muted">Telefon si konfiguraci '
                           "stáhl (naposledy %s) — jen účet, bez tokenu na "
@@ -3097,7 +3105,11 @@ def page_phone(info=""):
 
 def page_phone_lost():
     """Ztracený nebo ukradený telefon: nové heslo odpojí starý telefon."""
-    if sip_rotate_pending():
+    pending = sip_rotate_pending()
+    if pending and time.time() - pending > 60:
+        state = ('<p class="bad">[OVL-E33] Telefonní část žádost o nové heslo '
+                 "nevyřídila — restartuj aplikaci a zkus to znovu.</p>")
+    elif pending:
         state = ('<p class="warn">Heslo telefonu se právě mění — za pár vteřin '
                  "obnov stránku a načti do telefonu nový QR kód.</p>")
     else:
@@ -3107,7 +3119,8 @@ def page_phone_lost():
     return (
         "<h2>Ztracený nebo ukradený telefon</h2>"
         "<p>Nové heslo telefonu odpojí od miniserveru všechny telefony, které "
-        "znají to staré. Do svého telefonu pak načti nový QR kód. Ztracený "
+        "znají to staré (právě probíhající hovor se neukončí, nový už "
+        "nezačne). Do svého telefonu pak načti nový QR kód. Ztracený "
         "telefon odeber i z privátní sítě (v účtu sítě na stránce "
         "<b>Moje síť</b>) a na záložce Kontakty mu změň heslo pro "
         "synchronizaci. Celý postup: "
@@ -3618,9 +3631,13 @@ class Handler(BaseHTTPRequestHandler):
             # konfigurace se pak stahuje přes ni, ne z domácí wifi.
             remote = bool(ns["ip"]) and request_hostname(self.headers) == ns["ip"]
             host = ns["ip"] if remote else (lan_ip() or ns["ip"])
-            url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token())
+            url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token(remote))
             return self._html(page_qr(url, remote))
         if self.path == "/telefon/heslo":
+            # odpojuje telefon — jen z formuláře téhle stránky
+            if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+                return self._html(page_phone(
+                    '<p class="bad">[OVL-E34] Požadavek nepřišel z ovládání.</p>'), 403)
             if form.get("confirm") != "1":
                 return self._html(page_phone(
                     '<p class="bad">[OVL-E31] Potvrď, že se telefon odpojí.</p>'))
@@ -3778,14 +3795,19 @@ class ProvHandler(BaseHTTPRequestHandler):
         else:
             token = ""
         ip = ts_ip()
-        if not token or not ip or not prov_claim(token):
+        remote = prov_claim(token) if token and ip else None
+        if remote is None:
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        # klíč do sítě se bere až teď: platí hodinu a telefon ho použije hned
-        ts_key, ts_url, err = request_network_key()
-        _prov_last.update(t=time.time(), err=err, key=bool(ts_key))
+        if remote:
+            # telefon už v síti je — nový klíč by ho jen znovu přihlásil
+            ts_key, ts_url, err = "", "", ""
+        else:
+            # klíč do sítě se bere až teď: platí hodinu a telefon ho použije hned
+            ts_key, ts_url, err = request_network_key()
+        _prov_last.update(t=time.time(), err=err, key=bool(ts_key), remote=remote)
         if err:
             print("[prov] stažení z %s: účet ano, síť ne — %s"
                   % (self.client_address[0], err), flush=True)
