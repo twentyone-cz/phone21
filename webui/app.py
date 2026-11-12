@@ -2380,6 +2380,33 @@ def default_route_iface():
     return ""
 
 
+def request_hostname(headers):
+    """Jméno hostu, na které prohlížeč poslal požadavek (bez portu)."""
+    for name in ("X-Forwarded-Host", "Host"):
+        raw = (headers.get(name) or "").split(",")[0].strip()
+        if raw:
+            if raw.startswith("["):
+                return raw[1:].split("]", 1)[0].lower()
+            return raw.rsplit(":", 1)[0].lower() if raw.count(":") == 1 else raw.lower()
+    return ""
+
+
+def sip_rotated_at():
+    """Kdy ústředna naposledy změnila heslo telefonu (epoch, 0 = nikdy)."""
+    for ln in cli("database get phone21 sip_rotated").splitlines():
+        if ln.startswith("Value:"):
+            val = ln.split(":", 1)[1].strip()
+            if val.isdigit():
+                return int(val)
+    return 0
+
+
+def sip_rotate_pending():
+    """Čeká žádost o novou změnu hesla telefonu na ústřednu?"""
+    return any(ln.startswith("Value:")
+               for ln in cli("database get phone21 sip_rotate").splitlines())
+
+
 def lan_ip():
     """Adresa miniserveru v domácí síti. QR se stahuje DŘÍV, než je telefon
     v privátní síti, takže musí mířit na adresu, na kterou telefon dosáhne
@@ -3064,18 +3091,53 @@ def page_phone(info=""):
         "jinak tě hovor nemusí dozvonit.</p></details>"
         % (u("/telefon/qr"), esc(sec["SIP_USER"]),
            esc(sec.get("SIP_PASSWORD", "")), esc(ip or "—")))
+    blocks.append(page_phone_lost())
     return render("phone", "".join(blocks))
 
 
-def page_qr(url):
+def page_phone_lost():
+    """Ztracený nebo ukradený telefon: nové heslo odpojí starý telefon."""
+    if sip_rotate_pending():
+        state = ('<p class="warn">Heslo telefonu se právě mění — za pár vteřin '
+                 "obnov stránku a načti do telefonu nový QR kód.</p>")
+    else:
+        when = sip_rotated_at()
+        state = ('<p class="small muted">Heslo telefonu naposledy změněno %s.</p>'
+                 % time.strftime("%d. %m. %Y %H:%M", time.localtime(when))) if when else ""
+    return (
+        "<h2>Ztracený nebo ukradený telefon</h2>"
+        "<p>Nové heslo telefonu odpojí od miniserveru všechny telefony, které "
+        "znají to staré. Do svého telefonu pak načti nový QR kód. Ztracený "
+        "telefon odeber i z privátní sítě (v účtu sítě na stránce "
+        "<b>Moje síť</b>) a na záložce Kontakty mu změň heslo pro "
+        "synchronizaci. Celý postup: "
+        '<a href="https://phone.twentyone.cz/kradez" target="_blank">'
+        "phone.twentyone.cz/kradez</a></p>"
+        "%s"
+        '<form method="post" action="%s">'
+        '<p><label><input type="checkbox" name="confirm" value="1" required> '
+        "Rozumím, že se telefon odpojí, dokud nenačte nový QR kód.</label></p>"
+        "<button>Změnit heslo telefonu</button></form>"
+        % (state, u("/telefon/heslo")))
+
+
+def page_qr(url, remote=False):
     """QR s odkazem na konfiguraci; kód otevře aplikaci rovnou."""
+    if remote:
+        where = """<p><b>Kód míří na adresu miniserveru v privátní síti.</b>
+Telefon v ní musí být dřív, než kód načte: v aplikaci na obrazovce privátní
+sítě dej <b>Připojit přes Moji síť</b> a telefon schval. Kód platí 10 minut
+a jen jednou.</p>"""
+    else:
+        where = """<p><b>Telefon musí být na stejné wifi jako miniserver.</b> Konfiguraci si
+stahuje z domácí sítě, protože do privátní sítě se teprve chystá — a kód
+platí 10 minut a jen jednou. Na dálku: otevři ovládání přes adresu
+miniserveru v privátní síti a kód bude mířit tam.</p>"""
     body = """<h1>Připojení telefonu</h1>
 <p>Nejdřív si v telefonu nainstaluj aplikaci <b>Phone21</b>. Pak naskenuj kód —
 buď skenerem v aplikaci (Přidat účet → <b>Scan QR code</b>), nebo běžným
 fotoaparátem telefonu; obojí appku nastaví samo.</p>
-<p><b>Telefon musí být na stejné wifi jako miniserver.</b> Konfiguraci si
-stahuje z domácí sítě, protože do privátní sítě se teprve chystá — a kód
-platí 10 minut a jen jednou.</p>
+""" + where + """
 <div id="qr" class="qr"></div>
 
 <details><summary>Když skener nespolupracuje</summary>
@@ -3552,9 +3614,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_phone(
                     '<p class="bad">[OVL-E10] %s Nejdřív to sprav na záložce '
                     "Síť.</p>" % esc(ns["detail"])))
-            host = lan_ip() or ns["ip"]
+            # Ovládání otevřené přes privátní síť = telefon je na dálku:
+            # konfigurace se pak stahuje přes ni, ne z domácí wifi.
+            remote = bool(ns["ip"]) and request_hostname(self.headers) == ns["ip"]
+            host = ns["ip"] if remote else (lan_ip() or ns["ip"])
             url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token())
-            return self._html(page_qr(url))
+            return self._html(page_qr(url, remote))
+        if self.path == "/telefon/heslo":
+            if form.get("confirm") != "1":
+                return self._html(page_phone(
+                    '<p class="bad">[OVL-E31] Potvrď, že se telefon odpojí.</p>'))
+            # Ústředna si žádost vyzvedne do pár vteřin a heslo vymění sama
+            # (ovládání do tajemství zapisovat nesmí).
+            cli("database put phone21 sip_rotate %d" % int(time.time()))
+            audit("telefon/heslo ip=%s" % self.client_address[0])
+            if not sip_rotate_pending():
+                return self._html(page_phone(
+                    '<p class="bad">[OVL-E32] Žádost se nepodařilo předat — '
+                    "zkontroluj spojení s telefonní částí.</p>"))
+            return self._html(page_phone(
+                '<p class="ok">Heslo telefonu se mění. Za pár vteřin obnov '
+                "stránku a načti do telefonu nový QR kód.</p>"))
         if self.path == "/net/authkey" and TS_DIR:
             key = form.get("authkey", "").strip()
             # klíče koordinátora: base64-like tokeny, stejný tvar pro obě cesty

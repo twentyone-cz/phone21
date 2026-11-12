@@ -116,6 +116,15 @@ položka. Nainstaluj ji, přenes data z předchozí instalace (adresář
 phone.twentyone.cz. Bez přenosu dat začneš s prázdným žurnálem zpráv,
 novým heslem k ústředně a telefon bude potřebovat nový QR kód.
 
+## Ukradli mi telefon (nebo jsem ho ztratil) — co teď?
+
+Číslo bydlí v miniserveru, takže o něj nepřicházíš. Ztracený telefon
+odregistruj v **Moje síť**, v ovládání miniserveru na záložce **Telefon**
+dej **Změnit heslo telefonu** (ztracený telefon se odpojí i z domácí
+wifi) a na záložce Kontakty mu změň heslo nebo ho smaž. Nový telefon
+připojíš QR kódem doma, nebo na dálku přes **Připojit přes Moji síť**
+v aplikaci. Celý postup krok za krokem: phone.twentyone.cz/kradez.
+
 ## Co se stane s kontakty, když přijdu o telefon?
 
 Od verze 0.9.27 mohou kontakty i kalendář žít na miniserveru a telefon je

@@ -555,6 +555,35 @@ rotate_loop() {
 }
 rotate_loop &
 
+# Nové heslo telefonu na žádost z ovládání (AstDB phone21/sip_rotate): zapíše
+# se do tajemství i do běžící konfigurace a stará přihlášení se zahodí.
+sip_rotate_loop() {
+  local req pass tmp
+  while true; do
+    sleep 5
+    req="$(asterisk -rx 'database get phone21 sip_rotate' 2>/dev/null | awk '/^Value:/{print $2}')"
+    [[ -n "$req" ]] || continue
+    # shellcheck disable=SC1090
+    source "$SECRETS" 2>/dev/null || continue
+    pass="$(head -c 18 /dev/urandom | base64 | tr -d '/+=')"
+    [[ ${#pass} -ge 16 && -n "${AMI_PASSWORD:-}" ]] || continue
+    tmp="$SECRETS.tmp"
+    ( umask 077
+      printf 'SIP_USER=%s\nSIP_PASSWORD=%s\nAMI_PASSWORD=%s\n' \
+        "${SIP_USER:-softphone}" "$pass" "$AMI_PASSWORD" > "$tmp" ) || continue
+    chgrp 65534 "$tmp" 2>/dev/null || true
+    chmod 0640 "$tmp" 2>/dev/null || true
+    mv "$tmp" "$SECRETS" || continue
+    sed -i "s|^password=.*|password=$pass|" /etc/asterisk/pjsip.conf
+    asterisk -rx 'module reload res_pjsip.so' >/dev/null 2>&1 || true
+    asterisk -rx 'database deltree registrar contact' >/dev/null 2>&1 || true
+    asterisk -rx "database put phone21 sip_rotated $(date +%s)" >/dev/null 2>&1 || true
+    asterisk -rx 'database del phone21 sip_rotate' >/dev/null 2>&1 || true
+    log "heslo telefonu změněno na žádost z ovládání (stará přihlášení zrušena)"
+  done
+}
+sip_rotate_loop &
+
 if [[ "${SUPERVISE:-0}" == "1" ]]; then
   # Odstup mezi restarty roste exponenciálně (MIN → MAX). Po běhu delším
   # než STABLE_S se vrátí na začátek — pád hned po startu je jiná věc

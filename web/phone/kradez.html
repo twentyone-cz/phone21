@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phone21 — ukradený nebo ztracený telefon</title>
+<meta name="description" content="Co udělat, když přijdeš o telefon s aplikací Phone21: odpojit ho, změnit hesla a zprovoznit nový telefon — i na dálku.">
+<style>
+  :root { --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --acc:#F7931A; --card:#161b22; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); line-height:1.65; }
+  main { max-width:820px; margin:0 auto; padding:1.5rem; }
+  header { text-align:center; padding:2.5rem 1rem 1rem; }
+  .logo { height:1.8rem; vertical-align:middle; }
+  h1 { font-size:1.6rem; margin:.5rem 0 0; }
+  h2 { color:var(--acc); margin-top:2.4rem; font-size:1.25rem; }
+  ol.steps { padding-left:1.3rem; }
+  ol.steps li { margin:.55rem 0; }
+  code, pre { background:#010409; border:1px solid #21262d; border-radius:6px; font-size:.88rem; }
+  code { padding:.1rem .35rem; }
+  pre { padding:.8rem 1rem; overflow-x:auto; }
+  a { color:#58a6ff; text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .honest { border-left:3px solid var(--acc); padding:.2rem 1rem; color:var(--dim); background:var(--card); border-radius:0 8px 8px 0; }
+  .req { background:var(--card); border:1px solid #21262d; border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
+  footer { text-align:center; color:var(--dim); font-size:.85rem; padding:2.5rem 1rem; }
+  nav.top { display:flex; gap:1.4rem; justify-content:center; flex-wrap:wrap;
+    padding:.9rem 1rem; border-bottom:1px solid #21262d; background:#11161d; }
+  nav.top a { color:var(--dim); font-weight:600; font-size:.95rem; }
+  nav.top a:hover, nav.top a.act { color:var(--acc); text-decoration:none; }
+</style>
+</head>
+<body>
+<nav class="top"><a href="/">Domů</a><a href="/obchod/">Obchod</a><a href="/instalace">Instalace</a><a href="/kontakty">Kontakty</a><a href="/navod">VPN</a><a href="/dashboard">Moje síť</a><a href="/pay">Kredity</a></nav>
+<header>
+  <a href="/"><img class="logo" src="phone21.svg" alt="Phone21"></a>
+  <h1>Ukradený nebo ztracený telefon</h1>
+</header>
+<main>
+
+<div class="req">
+  <b>Dobrá zpráva napřed:</b> tvoje číslo bydlí v miniserveru doma, ne
+  v telefonu, takže o něj nepřicházíš. Přehled zpráv a hovorů najdeš
+  i v ovládání miniserveru. Jde jen o to, aby se ztracený telefon
+  k miniserveru už nedostal a nový se k němu připojil.
+</div>
+
+<p>Dokud ztracený telefon zůstává připojený, může přes tvoje číslo volat
+a psát a přijímat tvoje hovory. Proto postupuj v tomhle pořadí.</p>
+
+<h2>1. Hned: odpoj telefon z privátní sítě</h2>
+<ol class="steps">
+  <li>Na jiném zařízení otevři <a href="/dashboard">Moje síť</a> a přihlas se
+  Lightning peněženkou.</li>
+  <li>U ztraceného telefonu dej <b>odregistrovat</b>. Telefon se hned odpojí
+  a mimo tvoji domácí wifi se k miniserveru už nedostane. Kredit za zbytek
+  dne propadne, nový telefon pak stojí zase jeden kredit.</li>
+  <li>Byl jsi v telefonu přihlášený i do Mojí sítě v prohlížeči? Dej ještě
+  <b>Odhlásit všude jinde</b>.</li>
+</ol>
+<p class="honest">Peněženka, kterou se do Mojí sítě přihlašuješ, byla v tom
+telefonu? Obnov ji ze zálohy (seedu) v jiném zařízení — přihlásíš se stejnou
+identitou. Bez zálohy se do účtu nedostaneš; napiš nám do
+<a href="https://signal.group/#CjQKICmoKjOVbdR0LyWIVcwUXF0J8936DWpigeQixb7Zy48zEhB-mUTZ-Y6CxGUMUHZ2SbKp">skupiny
+na Signalu</a>.</p>
+
+<h2>2. Změň hesla na miniserveru</h2>
+<p>Ovládání miniserveru otevřeš doma z wifi, nebo na dálku z počítače, který
+je v privátní síti (adresa miniserveru v síti, port 8090).</p>
+<ol class="steps">
+  <li><b>Telefon → Ztracený nebo ukradený telefon → Změnit heslo telefonu.</b>
+  Ztracený telefon zná staré heslo a z tvojí domácí wifi by se připojil
+  dál. Nové heslo ho odpojí úplně. Tvůj telefon pak načte nový QR kód
+  (krok 3).</li>
+  <li><b>Kontakty:</b> u zařízení ztraceného telefonu změň heslo, nebo
+  zařízení smaž. Synchronizace kontaktů a kalendáře se mu tím zastaví.</li>
+  <li>Měl jsi v telefonu uložené heslo k ovládání nebo k umbrelu? Změň ho
+  taky.</li>
+</ol>
+
+<h2>3. Zprovozni nový telefon</h2>
+<p>Nainstaluj aplikaci <b>Phone21</b> podle <a href="/instalace">instalace</a>
+(krok 3). Pak podle toho, kde zrovna jsi:</p>
+<p><b>A) Doma:</b> v ovládání miniserveru <b>Telefon → Zobrazit QR pro
+Phone21</b> a kód naskenuj novým telefonem. Účet i privátní síť se nastaví
+samy.</p>
+<p><b>B) Na dálku:</b></p>
+<ol class="steps">
+  <li>V aplikaci otevři obrazovku privátní sítě a dej <b>Připojit přes Moji
+  síť</b>. V prohlížeči se přihlas peněženkou a telefon schval.</li>
+  <li>Z počítače v privátní síti otevři ovládání miniserveru (adresa
+  miniserveru v síti, port 8090) → <b>Telefon → Zobrazit QR pro
+  Phone21</b>. Kód teď míří do privátní sítě, takže ho nový telefon načte
+  odkudkoli.</li>
+  <li>Naskenuj kód novým telefonem. Hotovo — účet se přihlásí sám.</li>
+</ol>
+<p class="honest">Nemáš počítač v privátní síti? Pak zbývá cesta A, až
+budeš doma. Do zálohy se vyplatí mít v síti aspoň dvě zařízení — telefon
+a počítač.</p>
+
+<h2>4. Mimo Phone21</h2>
+<ol class="steps">
+  <li>Zablokuj SIM, která byla v telefonu, u operátora.</li>
+  <li>Změň hesla k účtům, které byly v telefonu přihlášené (e-mail,
+  komunikátory, banka), a pokud to telefon umí, smaž ho na dálku.</li>
+  <li>Změň heslo domácí wifi — ztracený telefon ho zná.</li>
+</ol>
+
+<h2>Jak se připravit dopředu</h2>
+<ul>
+  <li>Seed peněženky měj zálohovaný mimo telefon. Je to jediný klíč k tvé
+  síti.</li>
+  <li>Měj v privátní síti i počítač — nový telefon pak zprovozníš na
+  dálku.</li>
+  <li>Zamykej telefon a zapni šifrování (dnešní telefony ho mají
+  zapnuté samy).</li>
+</ul>
+
+<footer>
+  <a href="/">← zpět na Phone21</a>
+  <p>21&nbsp;% zisku jde na podporu české bitcoinové komunity <a href="https://jednadvacet.org/">Jednadvacet</a>.
+  Dotazy a&nbsp;novinky: <a href="https://signal.group/#CjQKICmoKjOVbdR0LyWIVcwUXF0J8936DWpigeQixb7Zy48zEhB-mUTZ-Y6CxGUMUHZ2SbKp">skupina na Signalu</a>.</p>
+</footer>
+</main>
+</body>
+</html>

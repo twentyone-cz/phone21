@@ -545,6 +545,28 @@ ast_journal_check() {
     '/usr/local/phone21/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/phone21/journal.jsonl'
 }
 dstep "žurnál SMS jde zapsat (sms-queue.sh journal)" ast_journal_check
+sip_rotate_check() {
+  # žádost z ovládání → nové heslo v tajemství i v běžící konfiguraci
+  local before after conf i
+  before="$(docker exec "$AST" sed -n 's/^SIP_PASSWORD=//p' /var/lib/phone21/secrets.env)"
+  [[ -n "$before" ]] || return 1
+  docker exec "$AST" asterisk -rx 'database put phone21 sip_rotate 1' >/dev/null
+  for i in $(seq 1 15); do
+    sleep 2
+    after="$(docker exec "$AST" sed -n 's/^SIP_PASSWORD=//p' /var/lib/phone21/secrets.env)"
+    [[ -n "$after" && "$after" != "$before" ]] && break
+  done
+  [[ -n "$after" && "$after" != "$before" ]] || { echo "heslo se nezměnilo"; return 1; }
+  conf="$(docker exec "$AST" sed -n 's/^password=//p' /etc/asterisk/pjsip.conf)"
+  [[ "$conf" == "$after" ]] || { echo "běžící konfigurace má jiné heslo"; return 1; }
+  docker exec "$AST" asterisk -rx 'database get phone21 sip_rotated' | grep -q '^Value:' \
+    || { echo "chybí čas změny"; return 1; }
+  ! docker exec "$AST" asterisk -rx 'database get phone21 sip_rotate' | grep -q '^Value:' \
+    || { echo "žádost zůstala viset"; return 1; }
+  docker exec "$AST" stat -c '%a %g' /var/lib/phone21/secrets.env | grep -qx '640 65534' \
+    || { echo "tajemství má špatná práva"; return 1; }
+}
+dstep "změna hesla telefonu na žádost z ovládání" sip_rotate_check
 
 # --- 5. ovládání nastartuje a mluví ----------------------------------------
 dstep "start kontejneru ovládání" \
