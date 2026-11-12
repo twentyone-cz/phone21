@@ -3187,10 +3187,21 @@ def page_phone_lost():
         % (state, u("/telefon/heslo")))
 
 
-def page_qr(url, remote=False):
-    """QR s odkazem na konfiguraci; kód otevře aplikaci rovnou."""
-    if remote:
-        where = """<p><b>Kód míří na adresu miniserveru v privátní síti.</b>
+def page_qr(url, remote=False, join_key="", key_err=""):
+    """QR s odkazem na konfiguraci; kód otevře aplikaci rovnou. Na dálku
+    nese za # jednorázový klíč do privátní sítě."""
+    manual_note = ""
+    if remote and join_key:
+        where = """<p><b>Kód míří na miniserver v privátní síti a nese jednorázový
+klíč do ní.</b> Aplikace telefon nejdřív připojí do sítě (potvrď souhlas
+s VPN) a pak si stáhne nastavení. Kód platí 10 minut a jen jednou. Kdo ho
+naskenuje, dostane účet i přístup do sítě, takže ho nikomu neukazuj.</p>"""
+        manual_note = ("<p>Ruční odkaz funguje, jen když už je telefon "
+                       "v privátní síti.</p>")
+    elif remote:
+        where = ("" if not key_err else
+                 '<p class="bad">[OVL-E35] Klíč do sítě se nepodařilo získat: '
+                 "%s</p>" % esc(key_err)) + """<p><b>Kód míří na adresu miniserveru v privátní síti.</b>
 Telefon v ní musí být dřív, než kód načte: v aplikaci na obrazovce privátní
 sítě dej <b>Připojit přes Moji síť</b> a telefon schval. Kód platí 10 minut
 a jen jednou.</p>"""
@@ -3209,17 +3220,18 @@ fotoaparátem telefonu; obojí appku nastaví samo.</p>
 <details><summary>Když skener nespolupracuje</summary>
 <p>V aplikaci: <b>Nastavení → Pokročilá nastavení → Remote provisioning
 URL</b> → vlož tenhle odkaz a dej <b>Download &amp; apply</b>:</p>
-<p class="mono" style="font-size:1.15rem;letter-spacing:.02em">%s</p></details>
+<p class="mono" style="font-size:1.15rem;letter-spacing:.02em">%s</p>%s</details>
 
 <p class="muted">Odkaz platí <b>10 minut</b> a jen na jedno použití;
 obsahuje heslo k účtu, takže ho nikam nepřeposílej. Když vyprší nebo se
 nepovede, vrať se a vygeneruj si nový.</p>
-<p><a href="%s">Zpět</a></p>""" % (esc(url), u("/telefon"))
+<p><a href="%s">Zpět</a></p>""" % (esc(url), manual_note, u("/telefon"))
     extra = """<script src="%s"></script><script>
 new QRCode(document.getElementById("qr"), {text: %s, width: 280, height: 280,
   correctLevel: QRCode.CorrectLevel.L});
 </script>""" % (u("/static/qrcode.min.js"),
-                json.dumps("linphone-config:" + url))
+                json.dumps("linphone-config:" + url
+                           + ("#k=" + join_key if join_key else "")))
     return render("phone", body, extra)
 
 
@@ -3685,7 +3697,13 @@ class Handler(BaseHTTPRequestHandler):
             remote = bool(ns["ip"]) and request_hostname(self.headers) == ns["ip"]
             host = ns["ip"] if remote else (lan_ip() or ns["ip"])
             url = "http://%s:%d/p/%s" % (host, PROV_PORT, prov_new_token(remote))
-            return self._html(page_qr(url, remote))
+            join_key, key_err = "", ""
+            if remote:
+                # QR na dálku nese jednorázový klíč do privátní sítě
+                join_key, _, key_err = request_network_key()
+                audit("telefon/qr na dálku: klíč do sítě %s"
+                      % ("vydán" if join_key else "nevydán"))
+            return self._html(page_qr(url, remote, join_key, key_err))
         if self.path == "/telefon/heslo":
             # odpojuje telefon — jen z formuláře téhle stránky
             if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):

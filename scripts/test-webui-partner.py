@@ -652,6 +652,25 @@ check("čerstvé hlášení do stavu žádnou výtku nepřidá",
       ns["state"] == "connecting" and "nehlásí" not in ns["detail"],
       ns["detail"])
 
+# --- 8. QR na dálku nese jednorázový klíč do sítě --------------------------
+
+print("8. QR na dálku")
+URL = "http://100.64.0.1:8091/p/abcd1234"
+page = app.page_qr(URL, True, GOOD_KEY, "")
+check("QR na dálku nese klíč za #",
+      json.dumps("linphone-config:" + URL + "#k=" + GOOD_KEY) in page)
+check("ruční odkaz klíč neukazuje",
+      page.count(GOOD_KEY) == 1, page.count(GOOD_KEY))
+check("ruční odkaz má poznámku o síti", "jen když už je telefon" in page)
+
+page = app.page_qr(URL, True, "", "Limit zařízení vyčerpán.")
+check("bez klíče na dálku je QR bez #", "#k=" not in page)
+check("chyba klíče se ukáže", "OVL-E35" in page and "Limit zařízení" in page)
+check("bez klíče platí původní návod", "Připojit přes Moji síť" in page)
+
+page = app.page_qr("http://192.168.0.56:8091/p/abcd1234")
+check("domácí QR klíč nenese", "#k=" not in page and "OVL-E35" not in page)
+
 # --- závěr -------------------------------------------------------------------
 
 os.replace = _orig_replace
