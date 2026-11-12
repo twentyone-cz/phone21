@@ -124,8 +124,10 @@ novým heslem k ústředně a telefon bude potřebovat nový QR kód.
 odregistruj v **Moje síť**, v ovládání miniserveru na záložce **Telefon**
 dej **Změnit heslo telefonu** (ztracený telefon se odpojí i z domácí
 wifi) a na záložce Kontakty mu změň heslo nebo ho smaž. Nový telefon
-připojíš QR kódem doma, nebo na dálku přes **Připojit přes Moji síť**
-v aplikaci. Celý postup krok za krokem: phone.twentyone.cz/kradez.
+připojíš QR kódem doma, nebo na dálku: ovládání otevřené z počítače
+v privátní síti dá QR kód s jednorázovým klíčem do sítě a nový telefon ho
+načte odkudkoli (miniserver od 0.9.42, aplikace od 6.2.4-21p.37). Celý
+postup krok za krokem: phone.twentyone.cz/kradez.
 
 ## Co se stane s kontakty, když přijdu o telefon?
 

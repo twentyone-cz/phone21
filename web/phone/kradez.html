@@ -85,17 +85,22 @@ je v privátní síti (adresa miniserveru v síti, port 8090).</p>
 <p><b>A) Doma:</b> v ovládání miniserveru <b>Telefon → Zobrazit QR pro
 Phone21</b> a kód naskenuj novým telefonem. Účet i privátní síť se nastaví
 samy.</p>
-<p><b>B) Na dálku:</b></p>
+<p><b>B) Na dálku</b> (miniserver od verze 0.9.42, aplikace od verze
+6.2.4-21p.37):</p>
 <ol class="steps">
-  <li>V aplikaci otevři obrazovku privátní sítě a dej <b>Připojit přes Moji
-  síť</b> (aplikace od verze 6.2.4-21p.35). V prohlížeči se přihlas peněženkou
-  a telefon schval.</li>
   <li>Z počítače v privátní síti otevři ovládání miniserveru (adresa
   miniserveru v síti, port 8090) → <b>Telefon → Zobrazit QR pro
-  Phone21</b>. Kód teď míří do privátní sítě, takže ho nový telefon načte
-  odkudkoli.</li>
-  <li>Naskenuj kód novým telefonem. Hotovo — účet se přihlásí sám.</li>
+  Phone21</b>. Kód nese jednorázový klíč do privátní sítě.</li>
+  <li>Naskenuj kód novým telefonem a potvrď souhlas s VPN. Aplikace telefon
+  nejdřív připojí do privátní sítě a pak si stáhne nastavení. Hotovo — účet
+  se přihlásí sám.</li>
 </ol>
+<p>Ovládání hlásí, že klíč do sítě nedostalo, protože je plný limit
+zařízení? Ztracený telefon ještě nejspíš visí v Mojí síti — odeber ho
+(krok 1) a QR zobraz znovu. Se starší verzí aplikace nebo miniserveru
+připoj nový telefon nejdřív v aplikaci na obrazovce privátní sítě
+tlačítkem <b>Připojit přes Moji síť</b> (přihlas se peněženkou a telefon
+schval) a teprve pak naskenuj kód.</p>
 <p class="honest">Nemáš počítač v privátní síti? Pak zbývá cesta A, až
 budeš doma. Do zálohy se vyplatí mít v síti aspoň dvě zařízení — telefon
 a počítač.</p>
