@@ -9,9 +9,9 @@ Co s tím:
 
 - **Výstupní uzel uvnitř privátní sítě** — provoz telefonu jde ven přes
   vybrané zařízení v síti a jednu aplikaci tím zastanou obě role. Od verze
-  0.9.31 to zvládne i sám miniserver: v ovládání na záložce Síť přepni
-  přístup na **i dál do sítě**. Nic dalšího se nepotvrzuje, jen se přepnutí
-  projeví do zhruba půl minuty. Podmínka je aplikace v telefonu 21p.34
+  0.9.31 to zvládne i sám miniserver: přepni přístup na **vše přes
+  miniserver** — od verze 0.9.41 přímo v aplikaci na obrazovce privátní sítě
+  (dřív v ovládání na záložce Síť). Přepnutí se projeví do zhruba půl minuty. Podmínka je aplikace v telefonu 21p.34
   a novější — starší verze umí výstupní uzel zapnout, ale ne vypnout.
 - **Druhý uživatelský profil** na telefonu — limit platí na profil, takže
   v jednom může běžet komerční VPN a v druhém miniserver.
@@ -68,14 +68,16 @@ normálně mimo privátní síť a miniserver o tom nic neví.
 Obráceně to ve výchozím nastavení platí taky: miniserver nepustí provoz
 z privátní sítě dál do domácí sítě ani do internetu a z jeho vlastních
 služeb je vidět jen to, co telefon potřebuje. Od verze 0.9.25 si to
-vynucuje sám, od 0.9.31 se to dá v ovládání (záložka Síť) povolit ve třech
-stupních:
+vynucuje sám a povolit se to dá ve třech stupních — v aplikaci na obrazovce
+privátní sítě i v ovládání (záložka Síť); od verze 0.9.41 je to jedna
+společná volba, změna na jednom místě platí i na druhém:
 
-- **jen telefon** (výchozí) — hovory, zprávy, ovládání, párování;
-- **celý miniserver** — všechny jeho služby (dashboard, další aplikace,
-  vzdálená správa); dál než na miniserver se pořád nedostaneš;
-- **i dál do sítě** — miniserver propouští provoz do domácí sítě a ven,
-  tedy funguje i jako výstupní uzel.
+- **jen hovory** (výchozí) — hovory, zprávy, ovládání, kontakty, párování;
+- **přístup na miniserver** — i ostatní aplikace v telefonu dosáhnou na
+  všechny služby miniserveru (dashboard, další aplikace, vzdálená správa);
+  dál než na miniserver se pořád nedostaneš;
+- **vše přes miniserver** — všechen provoz telefonu jde ven přes miniserver,
+  který ho propouští do domácí sítě i do internetu (výstupní uzel).
 
 Domácí sítě se filtr netýká v žádném stupni.
 

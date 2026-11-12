@@ -280,9 +280,9 @@ def debug_ssh_path():
 
 ACCESS_LEVELS = ("phone", "endpoint", "router")
 ACCESS_LABEL = {
-    "phone": "jen telefon",
-    "endpoint": "celý miniserver",
-    "router": "i dál do sítě",
+    "phone": "jen hovory",
+    "endpoint": "přístup na miniserver",
+    "router": "vše přes miniserver",
 }
 
 
@@ -307,6 +307,44 @@ def access_level():
     except OSError:
         pass
     return "phone"
+
+
+def set_access_level(level, who):
+    """Uloží stupeň přístupu (stejně z ovládání i z telefonu); OSError chytá volající."""
+    write_state(access_path(), level)
+    # starý přepínač ladění by volbu přebíjel
+    try:
+        os.remove(debug_ssh_path())
+    except FileNotFoundError:
+        pass
+    audit("net/access %s value=%s" % (who, level))
+
+
+def phone_access_token():
+    """Token, kterým telefon nastavuje přístup; odvozený z hesla účtu telefonu."""
+    password = read_secrets().get("SIP_PASSWORD", "")
+    if not password:
+        return ""
+    return hmac.new(password.encode(), b"phone21-pristup",
+                    hashlib.sha256).hexdigest()[:32]
+
+
+_access_fail = {}          # ip -> časy neúspěšných pokusů o token
+_access_fail_lock = threading.Lock()
+
+
+def access_auth_blocked(ip, failed=False):
+    """Strop neúspěšných pokusů o token telefonu (10 za 10 minut na adresu)."""
+    now = time.time()
+    with _access_fail_lock:
+        times = [t for t in _access_fail.get(ip, []) if now - t < 600]
+        if failed:
+            times.append(now)
+        if times:
+            _access_fail[ip] = times
+        else:
+            _access_fail.pop(ip, None)
+        return len(times) >= 10
 
 
 def debug_ssh_on():
@@ -1278,12 +1316,12 @@ def net_state():
     elif state == "idle" and reported and not fresh:
         detail = NET_NO_REPORT
     # Starší instalace visí v síti pod ručním klíčem bez značky brány: síť jim
-    # pak trasu ven nepustí a stupeň „i dál do sítě“ tiše nefunguje. Síť si
+    # pak trasu ven nepustí a stupeň „vše přes miniserver“ tiše nefunguje. Síť si
     # o nový klíč řekne sama, ale uživatel musí vědět, proč se to děje.
     untagged = state == "connected" and fresh and not st.get("tags")
     if untagged:
         detail += (" Síť ji ale zatím nevede jako bránu, takže stupeň "
-                   "„i dál do sítě“ nefunguje — připojení se samo obnoví "
+                   "„vše přes miniserver“ nefunguje — připojení se samo obnoví "
                    "novým klíčem.")
         cls = "warn"
     out.update(state=state, ip=ip, backend=backend, peers=peers,
@@ -1358,6 +1396,9 @@ def network_section(ts_url, ts_key, ts_exit_node=""):
     if ts_exit_node:
         rows.append('    <entry name="ts_exit_node" overwrite="true">%s</entry>'
                     % html.escape(ts_exit_node))
+    token = phone_access_token()
+    if token:
+        rows.append('    <entry name="pristup_token" overwrite="true">%s</entry>' % token)
     if not rows:
         return ""
     return '\n  <section name="twentyone">\n%s\n  </section>' % "\n".join(rows)
@@ -2864,17 +2905,18 @@ def page_net(info=""):
         blocks.append(
             "<h2>Přístup z privátní sítě</h2>"
             '<p class="small muted">Filtr provozu: <span class="%s">%s</span></p>'
-            "<p>Telefonování, ovládání a párování telefonu jsou dostupné vždy. "
-            "Navíc lze pustit dál:</p>"
-            "<ul><li><b>jen telefon</b> — nic dalšího z miniserveru není "
+            "<p>Telefonování, ovládání, kontakty a párování telefonu jsou "
+            "dostupné vždy. Stejnou volbu má aplikace Phone21 v telefonu "
+            "(obrazovka privátní sítě) — změna na jednom místě platí i na "
+            "druhém:</p>"
+            "<ul><li><b>jen hovory</b> — nic dalšího z miniserveru není "
             "z privátní sítě vidět (doporučeno);</li>"
-            "<li><b>celý miniserver</b> — všechny jeho služby včetně vzdálené "
-            "správy a ostatních aplikací; dál než na miniserver se nedostane;</li>"
-            "<li><b>i dál do sítě</b> — miniserver navíc propouští provoz do "
-            "domácí sítě a ven (výstupní uzel). Nic dalšího se nepotvrzuje, "
-            "přepnutí se projeví do zhruba půl minuty. V telefonu si pak "
-            "vyber miniserver jako výstupní uzel; potřebuje k tomu aplikaci "
-            "21p.34 nebo novější.</li></ul>"
+            "<li><b>přístup na miniserver</b> — všechny jeho služby včetně "
+            "vzdálené správy a ostatních aplikací; dál než na miniserver se "
+            "nedostane;</li>"
+            "<li><b>vše přes miniserver</b> — telefon posílá všechen provoz ven "
+            "přes miniserver (výstupní uzel) a miniserver ho propouští do domácí "
+            "sítě i ven. Přepnutí se projeví do zhruba půl minuty.</li></ul>"
             "<p>Stav: <b>%s</b></p>%s"
             % (fw_cls, esc(fw_txt), esc(ACCESS_LABEL[level]), choices))
     # Ve stavech, kde se čeká na odpověď sítě, se stránka sama obnovuje —
@@ -3042,12 +3084,22 @@ def page_dav(info="", login=None):
     return render("dav", "".join(blocks), script)
 
 
+PHONE_REFRESH = """<script>
+setTimeout(function () { location.replace(location.pathname); }, 5000);
+</script>"""
+
+
 def page_phone(info=""):
     """Připojení telefonu: QR kód + ruční údaje."""
     sec = read_secrets()
     ns = net_state()
     ip = ns["ip"]
     blocks = [info, "<h1>Telefon</h1>"]
+    pending = sip_rotate_pending()
+    if pending and time.time() - pending <= 60:
+        # během změny hesla by QR nesl heslo, které za chvíli neplatí
+        blocks.append(page_phone_lost())
+        return render("phone", "".join(blocks), PHONE_REFRESH)
     if not sec.get("SIP_USER"):
         blocks.append('<p class="bad">[OVL-E05] Nejde přečíst přihlašovací údaje '
                       "brány — zkus restartovat aplikaci.</p>")
@@ -3110,8 +3162,8 @@ def page_phone_lost():
         state = ('<p class="bad">[OVL-E33] Telefonní část žádost o nové heslo '
                  "nevyřídila — restartuj aplikaci a zkus to znovu.</p>")
     elif pending:
-        state = ('<p class="warn">Heslo telefonu se právě mění — za pár vteřin '
-                 "obnov stránku a načti do telefonu nový QR kód.</p>")
+        state = ('<p class="warn">Heslo telefonu se právě mění — stránka se '
+                 "sama obnoví a pak ukáže QR kód s novým heslem.</p>")
     else:
         when = sip_rotated_at()
         state = ('<p class="small muted">Heslo telefonu naposledy změněno %s.</p>'
@@ -3649,9 +3701,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_phone(
                     '<p class="bad">[OVL-E32] Žádost se nepodařilo předat — '
                     "zkontroluj spojení s telefonní částí.</p>"))
-            return self._html(page_phone(
-                '<p class="ok">Heslo telefonu se mění. Za pár vteřin obnov '
-                "stránku a načti do telefonu nový QR kód.</p>"))
+            # přesměrování: obnovení stránky nesmí heslo změnit podruhé
+            self.send_response(303)
+            self.send_header("Location", u("/telefon"))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path == "/net/authkey" and TS_DIR:
             key = form.get("authkey", "").strip()
             # klíče koordinátora: base64-like tokeny, stejný tvar pro obě cesty
@@ -3728,13 +3783,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(page_net(
                     '<p class="bad">[OVL-E24] Neznámá volba přístupu.</p>'))
             try:
-                write_state(access_path(), level)
-                # starý přepínač ladění by volbu přebíjel
-                try:
-                    os.remove(debug_ssh_path())
-                except FileNotFoundError:
-                    pass
-                audit("net/access ip=%s value=%s" % (self.client_address[0], level))
+                set_access_level(level, "ip=%s" % self.client_address[0])
                 # filtr se přepíná do 15 s, inzerce výstupního uzlu jeden
                 # průchod smyčky sítě — pro uživatele tedy „do půl minuty“
                 info = ('<p class="ok">Nastaveno: <b>%s</b>. Projeví se do '
@@ -3779,15 +3828,60 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class ProvHandler(BaseHTTPRequestHandler):
-    """Jediný účel: vydat konfiguraci softphonu na jednorázový token.
-    Běží bez hesla, takže nic jiného neobsluhuje."""
+    """Konfigurace softphonu na jednorázový token a stupeň přístupu pro
+    telefon (/pristup, token z konfigurace). Nic jiného neobsluhuje."""
     server_version = "phone21-prov"
 
     def log_message(self, fmt, *args):
         pass
 
+    def _json(self, code, obj):
+        data = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _access_authed(self):
+        ip = self.client_address[0]
+        if access_auth_blocked(ip):
+            self._json(429, {"error": "too many attempts"})
+            return False
+        token = phone_access_token()
+        got = (self.headers.get("Authorization") or "")
+        got = got[7:].strip() if got.startswith("Bearer ") else ""
+        if not token or not hmac.compare_digest(got.encode(), token.encode()):
+            access_auth_blocked(ip, failed=True)
+            self._json(401, {"error": "unauthorized"})
+            return False
+        return True
+
+    def do_POST(self):
+        if urllib.parse.urlparse(self.path).path != "/pristup":
+            return self._json(404, {"error": "not found"})
+        if not self._access_authed():
+            return
+        try:
+            n = min(int(self.headers.get("Content-Length") or 0), 256)
+        except ValueError:
+            n = 0
+        form = urllib.parse.parse_qs(self.rfile.read(n).decode(errors="replace"))
+        level = (form.get("level") or [""])[0]
+        if level not in ACCESS_LEVELS:
+            return self._json(400, {"error": "unknown level"})
+        try:
+            set_access_level(level, "telefon ip=%s" % self.client_address[0])
+        except OSError as e:
+            return self._json(500, {"error": str(e)})
+        return self._json(200, {"level": level})
+
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if path == "/pristup":
+            if self._access_authed():
+                self._json(200, {"level": access_level()})
+            return
         if path.startswith("/p/"):
             token = path[3:]
         elif path.startswith("/prov/") and path.endswith(".xml"):
