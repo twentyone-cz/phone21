@@ -265,9 +265,41 @@ common_setup() {
   chmod 0640 /var/log/asterisk/cdr-csv/Master.csv 2>/dev/null || true
 }
 
+# Zásahy hlídky pro ovládání (záložka Pokročilé čte $DATA/watchdog.log).
+watchdog_note() {
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$DATA/watchdog.log" 2>/dev/null || return 0
+  chgrp 65534 "$DATA/watchdog.log" 2>/dev/null || true
+  chmod 0640 "$DATA/watchdog.log" 2>/dev/null || true
+}
+
+# Reset modemu se stropem (společný s obnovou dat): přes ovladač, nebo přímo
+# do příkazového portu, když je ústředna zastavená.
+modem_reset() { # $1 = live | direct, $2 = příkazový port
+  local resets max="${QMI_RESET_MAX:-3}"
+  [[ "$max" =~ ^[0-9]+$ ]] || max=3
+  resets=$(qmi_reset_count)
+  [[ "$resets" =~ ^[0-9]+$ ]] || resets=0
+  if [[ $resets -ge $max ]]; then
+    log "POZOR: reset modemu přeskočen — už $resets za poslední hodinu (strop $max)"
+    return 1
+  fi
+  qmi_reset_mark
+  if [[ "$1" == direct ]]; then
+    [[ -c "$2" ]] && printf 'AT+CRESET\r' > "$2" 2>/dev/null || return 1
+  else
+    asterisk -rx "quectel cmd quectel0 AT+CRESET" >/dev/null 2>&1 || return 1
+  fi
+  log "watchdog: modem restartován"
+  watchdog_note "modem restartován"
+}
+
 watchdog_loop() {
   local fails=0 stuck=0 thr="${FAIL_THRESHOLD:-3}" interval="${WATCHDOG_INTERVAL:-30}"
-  local out state
+  local out state size audio_bad=0
+  # chyby ovladače, po kterých zůstane zvukový kanál modemu rozbitý
+  local logf=/var/log/asterisk/messages.log logpos
+  local audio_re='\[quectel0\]\[AT\+(CHLD=[12]x|CPCMREG=[01])\] ⍻ (Answer failed|Error sending hangup|Could not (de)?activate audio stream)'
+  logpos=$(stat -c %s "$logf" 2>/dev/null || echo 0)
   # pauza po marném restartu roste, dokud se modem nezotaví
   local at_dev="${AT_DEVICE:-/dev/ttyUSB2}" nomodem=0
   local pause_min=120 pause_max="${WATCHDOG_PAUSE_MAX:-600}" pause=120
@@ -281,6 +313,7 @@ watchdog_loop() {
       stuck=$((stuck + 1))
       log "watchdog: ústředna visí ve vypínání ($stuck/2)"
       if [[ $stuck -ge 2 ]]; then
+        watchdog_note "ústředna visela ve vypínání — ukončena"
         ast_stop || true
         stuck=0; fails=0
         sleep 120
@@ -304,7 +337,10 @@ watchdog_loop() {
       log "watchdog: modem nezdravý ($fails/$thr)"
       if [[ $fails -ge $thr ]]; then
         log "watchdog: restartuji ústřednu (další kontrola za ${pause} s)"
+        watchdog_note "modem neodpovídal ${thr}× po sobě — ústředna restartována"
         ast_stop || true
+        # samotný restart ústředny zvukový kanál modemu nespraví
+        modem_reset direct "$at_dev" || true
         fails=0
         sleep "$pause"
         pause=$(( pause * 2 )); [[ $pause -gt $pause_max ]] && pause=$pause_max
@@ -312,6 +348,24 @@ watchdog_loop() {
       fi
     else
       fails=0; pause=$pause_min
+    fi
+    size=$(stat -c %s "$logf" 2>/dev/null || echo 0)
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    (( size < logpos )) && logpos=0
+    if (( size > logpos )); then
+      tail -c +$((logpos + 1)) "$logf" 2>/dev/null | head -c $((size - logpos)) \
+        | grep -qE "$audio_re" && audio_bad=1
+      logpos=$size
+    fi
+    if [[ $audio_bad -eq 1 ]] \
+       && ! asterisk -rx 'core show channels concise' 2>/dev/null | grep -q '^Quectel/'; then
+      audio_bad=0
+      log "watchdog: zvukový kanál modemu po chybě ovladače — restartuji modem"
+      if modem_reset live; then
+        # během startu modemu se na jeho stav neptat
+        sleep 150
+        continue
+      fi
     fi
     sleep "$interval"
   done

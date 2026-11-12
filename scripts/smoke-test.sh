@@ -540,6 +540,14 @@ ast_dialplan_check() {
     "asterisk -rx 'dialplan show quectel-incoming' | grep -q sms-queue.sh"
 }
 dstep "dialplan volá sms-queue.sh" ast_dialplan_check
+ast_waiting_check() {
+  # čekající hovor se telefonu nenabízí; vypršelá doručenka SMS se nehlásí
+  docker exec "$AST" sh -c "
+    asterisk -rx 'dialplan show s@quectel-incoming' | grep -q 'REGEX(\"Quectel/.\* Quectel/\"' &&
+    asterisk -rx 'dialplan show waiting@quectel-incoming' | grep -q 'MessageSend' &&
+    asterisk -rx 'dialplan show report@quectel-incoming' | grep -q 'Message expired'"
+}
+dstep "čekající hovor a vypršelá doručenka v dialplanu" ast_waiting_check
 ast_journal_check() {
   docker exec "$AST" sh -c \
     '/usr/local/phone21/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/phone21/journal.jsonl'
