@@ -3,7 +3,7 @@ id: jednadvacet-phone21
 category: networking
 icon: https://phone.twentyone.cz/img/phone21-icon.svg
 name: Phone21
-version: "0.9.42"
+version: "0.9.43"
 tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
   Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
@@ -35,8 +35,7 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Nový telefon zprovozníš i na dálku jedním QR kódem: když ovládání otevřeš
-  z počítače v privátní síti, QR kód nese jednorázový klíč do sítě a aplikace
-  Phone21 (od verze 6.2.4-21p.37) telefon nejdřív připojí a pak si stáhne
-  nastavení. Hodí se hlavně po ztrátě telefonu — postup je na
-  phone.twentyone.cz/kradez.
+  QR kód pro telefon nově nastaví i mezinárodní předvolbu podle země
+  miniserveru (+420), takže čísla bez předvolby se vytáčejí správně i tehdy,
+  když je v telefonu zahraniční SIM. Patří k aplikaci Phone21 6.2.4-21p.38,
+  která opravuje první připojení do privátní sítě po čisté instalaci.
