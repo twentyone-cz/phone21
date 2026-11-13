@@ -1333,6 +1333,23 @@ def net_state():
     return out
 
 
+COUNTRY_ISO = {"420": "CZ", "421": "SK"}
+
+
+def prov_country_code():
+    """Předvolba země SIM v miniserveru (COUNTRY_CODE) bez „+“."""
+    return re.sub(r"\D", "", COUNTRY_CODE) or "420"
+
+
+def prov_country_iso():
+    """Řádek s ISO kódem země předvolby, jen když ho známe."""
+    iso = COUNTRY_ISO.get(prov_country_code())
+    if not iso:
+        return ""
+    return ('\n    <entry name="dial_prefix_iso_country_code" overwrite="true">'
+            "%s</entry>" % iso)
+
+
 def prov_xml(domain, ts_url="", ts_key="", ts_exit_node=""):
     """Konfigurace účtu pro aplikaci v telefonu.
 
@@ -1355,6 +1372,8 @@ def prov_xml(domain, ts_url="", ts_key="", ts_exit_node=""):
     <entry name="reg_sendregister" overwrite="true">1</entry>
     <entry name="publish" overwrite="true">0</entry>
     <entry name="dial_escape_plus" overwrite="true">0</entry>
+    <entry name="dial_prefix" overwrite="true">%(cc)s</entry>%(cc_iso)s
+    <entry name="use_dial_prefix_for_calls_and_chats" overwrite="true">1</entry>
   </section>
   <section name="auth_info_0">
     <entry name="username" overwrite="true">%(user)s</entry>
@@ -1376,7 +1395,9 @@ def prov_xml(domain, ts_url="", ts_key="", ts_exit_node=""):
 """ % {"domain": html.escape(domain), "ident": ident,
        "label": html.escape(ACCOUNT_LABEL),
        "user": html.escape(user), "passwd": html.escape(password),
-       "network": network_section(ts_url, ts_key, ts_exit_node)}
+       "network": network_section(ts_url, ts_key, ts_exit_node),
+       "cc": html.escape(prov_country_code()),
+       "cc_iso": prov_country_iso()}
 
 
 def network_section(ts_url, ts_key, ts_exit_node=""):

@@ -671,6 +671,30 @@ check("bez klíče platí původní návod", "Připojit přes Moji síť" in pag
 page = app.page_qr("http://192.168.0.56:8091/p/abcd1234")
 check("domácí QR klíč nenese", "#k=" not in page and "OVL-E35" not in page)
 
+# --- 9. předvolba země v konfiguraci telefonu -------------------------------
+
+print("9. předvolba v konfiguraci")
+import xml.etree.ElementTree as ET                     # noqa: E402
+xml_text = app.prov_xml("100.64.0.1")
+root = ET.fromstring(xml_text)
+proxy = {e.get("name"): e for e in root.iter() if e.tag.endswith("entry")}
+check("konfigurace je platné XML s předvolbou",
+      proxy.get("dial_prefix") is not None and proxy["dial_prefix"].text == "420",
+      xml_text[:200])
+check("předvolba má ISO kód země",
+      proxy.get("dial_prefix_iso_country_code") is not None
+      and proxy["dial_prefix_iso_country_code"].text == "CZ")
+check("předvolba se používá pro hovory i zprávy",
+      proxy["use_dial_prefix_for_calls_and_chats"].text == "1")
+check("předvolba přepisuje uloženou hodnotu",
+      proxy["dial_prefix"].get("overwrite") == "true")
+_cc = app.COUNTRY_CODE
+app.COUNTRY_CODE = "+43"
+xml_text = app.prov_xml("100.64.0.1")
+check("neznámá země: předvolba bez ISO kódu",
+      ">43<" in xml_text and "dial_prefix_iso_country_code" not in xml_text)
+app.COUNTRY_CODE = _cc
+
 # --- závěr -------------------------------------------------------------------
 
 os.replace = _orig_replace
