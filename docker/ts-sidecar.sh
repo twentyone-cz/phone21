@@ -432,6 +432,8 @@ update_ip() {
   if [ -n "$IP4" ]; then
     up_cur=$(sed -n '1p' "$TS/ip" 2>/dev/null)
     if [ "$up_cur" != "$IP4" ]; then
+      # záměr: když selže zápis nebo přesun, uklidit dočasný soubor
+      # shellcheck disable=SC2015
       printf '%s\n' "$IP4" 2>/dev/null > "$TS/.ip.tmp" \
         && mv -f "$TS/.ip.tmp" "$TS/ip" 2>/dev/null \
         || rm -f "$TS/.ip.tmp" 2>/dev/null

@@ -493,6 +493,8 @@ step "smyčka služby privátní sítě projde vlastním testem" \
   bash scripts/test-ts-sidecar.sh
 step "klient koordinátoru v ovládání projde vlastním testem" \
   python3 scripts/test-webui-partner.py
+step "hlídka modemu pozná modem bez hlasu/SMS a počká na něj po resetu" \
+  bash scripts/test-modem-health.sh
 
 # --- 2. build obrazů -------------------------------------------------------
 dstep "build obrazu ústředny" \

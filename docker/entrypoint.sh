@@ -36,6 +36,13 @@ AST_PIDFILE=/run/asterisk-main.pid
 # značka, že ústřednu ukončila hlídka (ne pád) — čte ji smyčka SUPERVISE
 AST_RESTART_FLAG=/run/asterisk-restart.req
 rm -f "$AST_RESTART_FLAG" 2>/dev/null || true
+# Dokud soubor existuje, smyčka SUPERVISE ústřednu nespustí: hlídka ho drží
+# po dobu resetu modemu, aby se ovladač neinicializoval proti modemu v půlce
+# startu (výpadek 2026-11-15, viz modem-health.sh).
+AST_HOLD=/run/asterisk-hold
+rm -f "$AST_HOLD" 2>/dev/null || true
+# shellcheck source=docker/modem-health.sh
+. "${MODEM_HEALTH_LIB:-/opt/phone21/modem-health.sh}"
 
 log() { echo "[entrypoint] $*"; }
 
@@ -293,9 +300,26 @@ modem_reset() { # $1 = live | direct, $2 = příkazový port
   watchdog_note "modem restartován"
 }
 
+# Úplná obnova v pořadí, které nedovolí souběh: zastavit ústřednu, resetovat
+# modem, počkat, až je modem připravený, a teprve pak pustit ústřednu.
+modem_full_recover() { # $1 = příkazový port
+  local at_dev="$1" max="${MODEM_READY_MAX:-180}"
+  : > "$AST_HOLD"
+  ast_stop || true
+  if modem_reset direct "$at_dev"; then
+    if modem_wait_ready "$at_dev" "$max"; then
+      log "watchdog: modem po resetu připravený — spouštím ústřednu"
+    else
+      log "POZOR: modem po resetu nepřipravený ani po ${max} s — spouštím ústřednu i tak"
+      watchdog_note "modem po resetu nepřipravený ani po ${max} s"
+    fi
+  fi
+  rm -f "$AST_HOLD"
+}
+
 watchdog_loop() {
   local fails=0 stuck=0 thr="${FAIL_THRESHOLD:-3}" interval="${WATCHDOG_INTERVAL:-30}"
-  local out state size audio_bad=0
+  local out verdict size audio_bad=0 caps_bad=0 caps_fix=0
   # chyby ovladače, po kterých zůstane zvukový kanál modemu rozbitý
   local logf=/var/log/asterisk/messages.log logpos
   local audio_re='\[quectel0\]\[AT\+(CHLD=[12]x|CPCMREG=[01])\] ⍻ (Answer failed|Error sending hangup|Could not (de)?activate audio stream)'
@@ -331,16 +355,16 @@ watchdog_loop() {
       continue
     fi
     if [[ $nomodem -eq 1 ]]; then log "watchdog: modem je zpátky ($at_dev)"; nomodem=0; fi
-    state="$(asterisk -rx 'quectel show device state quectel0' 2>/dev/null | awk '/State/{print $3}')"
-    if [[ -z "$state" || "$state" == "Not" ]]; then
-      fails=$((fails + 1))
+    modem_state_parse <<< "$(asterisk -rx 'quectel show device state quectel0' 2>/dev/null)"
+    verdict="$(modem_verdict)"
+    if [[ "$verdict" == dead ]]; then
+      fails=$((fails + 1)); caps_bad=0
       log "watchdog: modem nezdravý ($fails/$thr)"
       if [[ $fails -ge $thr ]]; then
-        log "watchdog: restartuji ústřednu (další kontrola za ${pause} s)"
-        watchdog_note "modem neodpovídal ${thr}× po sobě — ústředna restartována"
-        ast_stop || true
+        log "watchdog: restartuji ústřednu i modem (další kontrola za ${pause} s)"
+        watchdog_note "modem neodpovídal ${thr}× po sobě — ústředna a modem restartovány"
         # samotný restart ústředny zvukový kanál modemu nespraví
-        modem_reset direct "$at_dev" || true
+        modem_full_recover "$at_dev"
         fails=0
         sleep "$pause"
         pause=$(( pause * 2 )); [[ $pause -gt $pause_max ]] && pause=$pause_max
@@ -348,6 +372,32 @@ watchdog_loop() {
       fi
     else
       fails=0; pause=$pause_min
+      # Modem v síti, ale ovladač nemá hlas nebo SMS: odchozí hovory končí
+      # „protistrana zavěsila" a SMS se neodešlou, přestože stav vypadá zdravě.
+      # Nejdřív nová inicializace v ovladači, když nepomůže, úplná obnova.
+      if [[ "$verdict" == nocaps ]] && ! modem_busy; then
+        caps_bad=$((caps_bad + 1))
+        log "watchdog: modem v síti, ale bez hlasu/SMS (hlas=${MS_VOICE:-?} sms=${MS_SMS:-?}) ($caps_bad/2)"
+        if [[ $caps_bad -ge 2 ]]; then
+          caps_bad=0
+          if [[ $caps_fix -eq 0 ]]; then
+            caps_fix=1
+            log "watchdog: znovu inicializuji modem v ovladači"
+            watchdog_note "modem bez hlasu/SMS — nová inicializace"
+            asterisk -rx 'quectel restart now quectel0' >/dev/null 2>&1 || true
+            sleep 90
+            continue
+          fi
+          caps_fix=0
+          log "watchdog: nová inicializace nepomohla — restartuji ústřednu i modem"
+          watchdog_note "modem bez hlasu/SMS ani po nové inicializaci — ústředna a modem restartovány"
+          modem_full_recover "$at_dev"
+          sleep 60
+          continue
+        fi
+      elif [[ "$verdict" == ok ]]; then
+        caps_bad=0; caps_fix=0
+      fi
     fi
     size=$(stat -c %s "$logf" 2>/dev/null || echo 0)
     [[ "$size" =~ ^[0-9]+$ ]] || size=0
@@ -580,7 +630,7 @@ lan_ip_loop &
 # Rotace rostoucích souborů: log ústředny, historie hovorů a žurnál zpráv.
 rotate_loop() {
   local astlog=/var/log/asterisk
-  local max_kb="${LOG_MAX_KB:-5120}" cdr_keep="${CDR_KEEP:-5000}" jr_keep="${JOURNAL_KEEP:-1000}"
+  local max_kb="${LOG_MAX_KB:-5120}" log_keep="${LOG_KEEP:-6}" cdr_keep="${CDR_KEEP:-5000}" jr_keep="${JOURNAL_KEEP:-1000}"
   size_kb() { local s; s=$(stat -c %s "$1" 2>/dev/null || echo 0); echo $(( s / 1024 )); }
   trim() { # $1 = soubor, $2 = kolik posledních řádků ponechat
     tail -n "$2" "$1" > "$1.tmp" 2>/dev/null || { rm -f "$1.tmp"; return 0; }
@@ -594,9 +644,11 @@ rotate_loop() {
     sleep 3600
     if [[ $(size_kb "$astlog/messages.log") -ge $max_kb || $(size_kb "$astlog/debug.log") -ge $max_kb ]]; then
       asterisk -rx 'logger rotate' >/dev/null 2>&1 || true
-      # drží se jen nejnovější generace (podle času)
+      # drží se posledních LOG_KEEP generací (podle času). Dřív jen jedna:
+      # po výpadku 2026-11-15 už log neobsahoval start ovladače modemu.
+      [[ "$log_keep" =~ ^[0-9]+$ && $log_keep -ge 1 ]] || log_keep=6
       for b in messages.log debug.log; do
-        ls -t "$astlog/$b".* 2>/dev/null | tail -n +2 | xargs -r rm -f
+        ls -t "$astlog/$b".* 2>/dev/null | tail -n +$((log_keep + 1)) | xargs -r rm -f
       done
       # log musí zůstat čitelný pro ovládání
       chmod 0644 "$astlog/messages.log" 2>/dev/null || true
@@ -667,6 +719,11 @@ if [[ "${SUPERVISE:-0}" == "1" ]]; then
     printf '%s' "$AST_MAIN" > "$AST_PIDFILE"
     wait "$AST_MAIN" || true
     rm -f "$AST_PIDFILE"
+    # hlídka drží start, dokud modem po resetu nenaběhne (strop pro případ,
+    # že by hlídka uprostřed zemřela a soubor nechala ležet)
+    hold_t=0
+    while [[ -e "$AST_HOLD" && $hold_t -lt ${AST_HOLD_MAX:-300} ]]; do sleep 2; hold_t=$((hold_t + 2)); done
+    rm -f "$AST_HOLD"
     if [[ "$(cat "$AST_RESTART_FLAG" 2>/dev/null)" == "$AST_MAIN" ]]; then
       # ukončila ji hlídka modemu, ne pád — plná rychlost startu
       rm -f "$AST_RESTART_FLAG"

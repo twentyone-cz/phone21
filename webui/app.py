@@ -2609,7 +2609,18 @@ def page_home(info=""):
     """GUI režim (Umbrel): spotřebitelský dashboard místo technických výpisů."""
     tiles = []
     m = modem_summary()
-    if m and m.get("State") == "Free":
+    # Modem v síti, ale ovladač bez hlasu nebo SMS: odchozí hovory končí hned
+    # a SMS neodejdou, přestože stav i signál vypadají dobře (výpadek
+    # 2026-11-15). Hlídka to opraví sama; dlaždice nesmí tvrdit „Připojeno".
+    missing = [name for key, name in (("Voice", "hovory"), ("SMS", "SMS"))
+               if m and m.get(key) == "No"]
+    if m and missing and str(m.get("GSM Registration Status", "")).startswith("Registered"):
+        tiles.append(_tile(
+            "\U0001F4F6", "Mobilní síť", "Nefungují " + " ani ".join(missing), "bad",
+            "modem je v síti (%s · signál %s), ale nepřipravil se — krabička ho "
+            "do pár minut znovu nastaví sama; když to nepomůže, restartuj aplikaci"
+            % (esc(m.get("Provider Name", "?")), esc(signal_percent(m.get("RSSI"))))))
+    elif m and m.get("State") == "Free":
         tiles.append(_tile(
             "\U0001F4F6", "Mobilní síť", "Připojeno", "ok",
             "%s · %s%s · signál %s" % (esc(m.get("Provider Name", "?")),
@@ -2636,9 +2647,16 @@ def page_home(info=""):
     tiles.append(_tile("\U0001F512", "Privátní síť", esc(ns["label"]),
                        ns["cls"], note))
     sec = read_secrets()
-    if ns["ready"] and sec.get("SIP_USER"):
+    registered = any("Avail" in ln for ln in cli("pjsip show contacts").splitlines())
+    if ns["ready"] and sec.get("SIP_USER") and registered:
         tiles.append(_tile(
-            "\U0001F4F1", "Telefon", "Připraveno", "ok",
+            "\U0001F4F1", "Telefon", "Připojený", "ok",
+            "aplikace Phone21 je přihlášená — hovory a SMS chodí do telefonu"))
+    elif ns["ready"] and sec.get("SIP_USER"):
+        tiles.append(_tile(
+            "\U0001F4F1", "Telefon", "Nepřipojený", "warn",
+            "aplikace Phone21 teď není přihlášená — příchozí hovory a SMS čekají; "
+            "otevři ji v telefonu · nový telefon: "
             '<a href="%s">načti QR do aplikace Phone21</a> · '
             '<a href="https://phone.twentyone.cz/instalace" target="_blank">'
             "návod</a>" % u("/telefon")))

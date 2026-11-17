@@ -46,6 +46,7 @@ COPY docker/tunnel-firewall.nft /opt/phone21/tunnel-firewall.nft
 # sms-queue.sh musí být v obraze na cestě, kterou volá dialplan.
 COPY scripts/sms-queue.sh /usr/local/phone21/sms-queue.sh
 COPY docker/entrypoint.sh /opt/phone21/entrypoint.sh
+COPY docker/modem-health.sh /opt/phone21/modem-health.sh
 RUN chmod +x /opt/phone21/entrypoint.sh /opt/phone21/scripts/*.sh \
       /usr/local/phone21/sms-queue.sh
 
