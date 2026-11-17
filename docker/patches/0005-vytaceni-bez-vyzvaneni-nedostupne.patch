@@ -1,0 +1,102 @@
+Phone21: hovor, který do daného času nezačne vyzvánět, skončí jako nedostupný
+
+Volání na vypnutý nebo nedostupný telefon modem drží ve stavu DIALING i
+několik minut: síť do hovoru hraje hlášku, kterou modem do zvukového kanálu
+nepustí, a ústředna by čekala v tichu až do vypršení celého Dial().
+
+- channel_call čte proměnnou QUECTEL_ALERT_TIMEOUT (sekundy, z dialplanu
+  jako QUECTEL_EARLY_AUDIO). Je-li > 0, nastaví odchozímu kanálu čas zavěšení
+  (whentohangup) a příznak CALL_FLAG_ALERT_TIMEOUT.
+- Když modem ohlásí vyzvánění (ALERTING) nebo přijetí (ACTIVE), čas zavěšení
+  se zruší. Zámek kanálu se bere při drženém zámku zařízení — stejné pořadí,
+  jaké na tomtéž místě používá ast_queue_control() v cpvt_control().
+- Vyprší-li čas dřív, jádro odchozí kanál zavěsí (AST_SOFTHANGUP_TIMEOUT),
+  Dial skončí jako CHANUNAVAIL a ovladač modem zavěsí (AT+CHUP) jako
+  při běžném konci Dial. Dialplan pozná nedostupnost podle prázdného
+  RINGTIME.
+- Bez proměnné (nebo s 0) se ovladač chová jako dosud.
+
+diff --git a/src/channel.c b/src/channel.c
+index c3eec26..d02d0da 100644
+--- a/src/channel.c
++++ b/src/channel.c
+@@ -242,6 +242,11 @@ static int channel_call(struct ast_channel* channel, const char* dest, attribute
+ 
+     /* Phone21: early audio only when the dialplan asks for it (channel is locked by ast_call) */
+     const int early_audio = ast_true(pbx_builtin_getvar_helper(channel, "QUECTEL_EARLY_AUDIO"));
++    /* Phone21: limit (seconds) for the modem to report ringing; a switched-off
++     * phone keeps the call in DIALING for minutes while the network plays an
++     * announcement the modem does not pass on. Cleared on ALERTING/ACTIVE. */
++    const char* const alert_timeout_var = pbx_builtin_getvar_helper(channel, "QUECTEL_ALERT_TIMEOUT");
++    const int alert_timeout             = alert_timeout_var ? atoi(alert_timeout_var) : 0;
+ 
+     SCOPED_MUTEX(pvt_lock, &pvt->lock);
+ 
+@@ -255,6 +260,11 @@ static int channel_call(struct ast_channel* channel, const char* dest, attribute
+     if (early_audio) {
+         CPVT_SET_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO_ON);
+     }
++    if (alert_timeout > 0) {
++        ast_channel_setwhentohangup_tv(channel, ast_tv(alert_timeout, 0));
++        CPVT_SET_FLAG(cpvt, CALL_FLAG_ALERT_TIMEOUT);
++        ast_debug(1, "[%s] Ringing expected within %d s\n", PVT_ID(pvt), alert_timeout);
++    }
+     ast_debug(1, "[%s] Calling %s on %s\n", PVT_ID(pvt), dest, ast_channel_name(channel));
+ 
+     int clir = 0;
+diff --git a/src/cpvt.c b/src/cpvt.c
+index ad669ec..83b931e 100644
+--- a/src/cpvt.c
++++ b/src/cpvt.c
+@@ -300,6 +300,21 @@ static void early_audio_start(struct cpvt* const cpvt, struct pvt* const pvt)
+     ast_debug(1, "[%s] Early audio requested - idx:%d\n", PVT_ID(pvt), cpvt->call_idx);
+ }
+ 
++/* Phone21: the modem reported ringing (or an answer) in time - drop the
++ * QUECTEL_ALERT_TIMEOUT hangup time set in channel_call(). Same lock order
++ * (pvt, then channel) as ast_queue_control() in cpvt_control(). */
++static void alert_timeout_clear(struct cpvt* const cpvt, struct pvt* const pvt, struct ast_channel* const channel)
++{
++    if (!CPVT_TEST_FLAG(cpvt, CALL_FLAG_ALERT_TIMEOUT)) {
++        return;
++    }
++    CPVT_RESET_FLAG(cpvt, CALL_FLAG_ALERT_TIMEOUT);
++    ast_channel_lock(channel);
++    ast_channel_setwhentohangup_tv(channel, ast_tv(0, 0));
++    ast_channel_unlock(channel);
++    ast_debug(1, "[%s] Ringing in time - idx:%d\n", PVT_ID(pvt), cpvt->call_idx);
++}
++
+ static void change_state(struct cpvt* const cpvt, struct pvt* const pvt, struct ast_channel* const channel, const call_state_t oldstate,
+                          const call_state_t newstate, const short call_idx, const int cause)
+ {
+@@ -314,6 +329,7 @@ static void change_state(struct cpvt* const cpvt, struct pvt* const pvt, struct
+             break;
+ 
+         case CALL_STATE_ALERTING:
++            alert_timeout_clear(cpvt, pvt, channel);
+             cpvt_call_activate(cpvt);
+             cpvt_control(cpvt, AST_CONTROL_RINGING);
+             ast_setstate(channel, AST_STATE_RINGING);
+@@ -325,6 +341,7 @@ static void change_state(struct cpvt* const cpvt, struct pvt* const pvt, struct
+             break;
+ 
+         case CALL_STATE_ACTIVE:
++            alert_timeout_clear(cpvt, pvt, channel);
+             cpvt_call_activate(cpvt);
+             if (oldstate == CALL_STATE_ONHOLD) {
+                 ast_debug(1, "[%s] Unhold call idx:%d\n", PVT_ID(pvt), call_idx);
+diff --git a/src/cpvt.h b/src/cpvt.h
+index 5207a57..0723769 100644
+--- a/src/cpvt.h
++++ b/src/cpvt.h
+@@ -49,7 +49,8 @@ typedef enum {
+     CALL_FLAG_LOCAL_CHANNEL    = 1024, /*!< local channel flag */
+     CALL_FLAG_INTERNAL_REQUEST = 2048, /*!< internal request */
+     CALL_FLAG_EARLY_AUDIO_ON   = 4096, /*!< Phone21: dialplan allowed early audio for this outgoing call */
+-    CALL_FLAG_EARLY_AUDIO      = 8192  /*!< Phone21: AT+CPCMREG=1 already requested before ACTIVE */
++    CALL_FLAG_EARLY_AUDIO      = 8192, /*!< Phone21: AT+CPCMREG=1 already requested before ACTIVE */
++    CALL_FLAG_ALERT_TIMEOUT    = 16384 /*!< Phone21: channel hangs up unless the modem starts ringing in time */
+ } call_flag_t;
+ 
+ #define CALL_DIR_INCOMING 1u

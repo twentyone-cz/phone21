@@ -573,9 +573,10 @@ early_media_patch_check() {
     so=$(find /usr/lib -name chan_quectel.so -path "*asterisk*" | head -1)
     [ -n "$so" ] || { echo "ovladač modemu v obraze chybí"; exit 1; }
     grep -aq QUECTEL_EARLY_AUDIO "$so" || { echo "chybí volba early media"; exit 1; }
-    grep -aq "Early audio requested" "$so" || { echo "chybí časná aktivace zvuku"; exit 1; }'
+    grep -aq "Early audio requested" "$so" || { echo "chybí časná aktivace zvuku"; exit 1; }
+    grep -aq QUECTEL_ALERT_TIMEOUT "$so" || { echo "chybí limit pro začátek vyzvánění (0005)"; exit 1; }'
 }
-dstep "ovladač modemu má patch early media (0002)" early_media_patch_check
+dstep "ovladač modemu má patche early media (0002) a limitu vyzvánění (0005)" early_media_patch_check
 early_media_dialplan_check() {
   # oba vzory odchozích hovorů mají early media jen na výslovné zapnutí v AstDB
   # a po Dial jdou do vyhodnocení důvodu konce (Gosub, ne Goto — jinak by
@@ -590,6 +591,7 @@ early_media_dialplan_check() {
       printf '%s\n' \"\$end\" | grep -qF \"\$c\" || { echo \"gsm-dial-end: chybí \$c\"; exit 1; }
     done;
     [ \$(printf '%s\n' \"\$out\" | grep -cF 'early_media)}\"=\"on\"]?yes:no') -eq 2 ] || { echo 'early media není ve výchozím stavu vypnuté'; exit 1; }
+    [ \$(printf '%s\n' \"\$out\" | grep -cF '_QUECTEL_ALERT_TIMEOUT=30') -eq 2 ] || { echo 'chybí limit 30 s pro začátek vyzvánění'; exit 1; }
     tone=\$(asterisk -rx 'dialplan show s@gsm-dial-tone');
     printf '%s\n' \"\$tone\" | grep -qF 'Playtones(' || { echo 'gsm-dial-tone: chybí Playtones'; exit 1; }
     asterisk -rx 'indication show cz' | grep -q '425/330,0/330' || { echo 'chybí české tóny'; exit 1; }"
