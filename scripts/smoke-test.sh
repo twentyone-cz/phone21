@@ -577,7 +577,7 @@ early_media_patch_check() {
 }
 dstep "ovladač modemu má patch early media (0002)" early_media_patch_check
 early_media_dialplan_check() {
-  # oba vzory odchozích hovorů zapínají early media (s vypínačem v AstDB)
+  # oba vzory odchozích hovorů mají early media jen na výslovné zapnutí v AstDB
   # a po Dial jdou do vyhodnocení důvodu konce (Gosub, ne Goto — jinak by
   # historie hovorů ukázala místo čísla „s“)
   docker exec "$AST" sh -c "
@@ -586,11 +586,15 @@ early_media_dialplan_check() {
     [ \$(printf '%s\n' \"\$out\" | grep -c 'Gosub(gsm-dial-end,s,1)') -eq 2 ] || { echo 'po Dial chybí vyhodnocení konce'; exit 1; }
     ! printf '%s\n' \"\$out\" | grep -A1 'Dial(Quectel' | grep -q 'Hangup()' || { echo 'po Dial zůstal holý Hangup()'; exit 1; }
     end=\$(asterisk -rx 'dialplan show s@gsm-dial-end');
-    for c in 'Hangup(17)' 'Hangup(16)' 'Hangup(1)' 'Hangup(19)' 'Hangup(34)' 'Hangup(31)' 'HANGUPCAUSE'; do
+    for c in 'Hangup(17)' 'Hangup(16)' 'Hangup(1)' 'Hangup(19)' 'Hangup(20)' 'Hangup(34)' 'HANGUPCAUSE' 'RINGTIME' 'gsm-dial-tone'; do
       printf '%s\n' \"\$end\" | grep -qF \"\$c\" || { echo \"gsm-dial-end: chybí \$c\"; exit 1; }
-    done"
+    done;
+    [ \$(printf '%s\n' \"\$out\" | grep -cF 'early_media)}\"=\"on\"]?yes:no') -eq 2 ] || { echo 'early media není ve výchozím stavu vypnuté'; exit 1; }
+    tone=\$(asterisk -rx 'dialplan show s@gsm-dial-tone');
+    printf '%s\n' \"\$tone\" | grep -qF 'Playtones(' || { echo 'gsm-dial-tone: chybí Playtones'; exit 1; }
+    asterisk -rx 'indication show cz' | grep -q '425/330,0/330' || { echo 'chybí české tóny'; exit 1; }"
 }
-dstep "dialplan: early media u odchozích hovorů a srozumitelný důvod konce" early_media_dialplan_check
+dstep "dialplan: early media vypnuté, srozumitelný důvod konce, české tóny" early_media_dialplan_check
 ast_journal_check() {
   docker exec "$AST" sh -c \
     '/usr/local/phone21/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/phone21/journal.jsonl'
