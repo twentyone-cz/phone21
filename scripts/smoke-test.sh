@@ -550,6 +550,23 @@ ast_waiting_check() {
     asterisk -rx 'dialplan show report@quectel-incoming' | grep -q 'Message expired'"
 }
 dstep "čekající hovor a vypršelá doručenka v dialplanu" ast_waiting_check
+ast_voice_quality_check() {
+  # vyrovnávací paměť zvuku z telefonu (odchozí i příchozí) a kodek 16 kHz
+  docker exec "$AST" sh -c "
+    asterisk -rx 'core show function JITTERBUFFER' | grep -q 'JITTERBUFFER' &&
+    asterisk -rx 'dialplan show phone21-jb' | grep -q 'JITTERBUFFER(adaptive)' &&
+    asterisk -rx 'dialplan show s@quectel-incoming' | grep -q 'b(phone21-jb' &&
+    asterisk -rx 'dialplan show from-softphone' | grep -c 'JITTERBUFFER(adaptive)' | grep -q '^2$' &&
+    asterisk -rx 'core show codecs audio' | grep -qi 'g722' &&
+    asterisk -rx 'core show translation paths g722' | grep -qi 'slin.*16000'" || return 1
+  # endpoint telefonu nastavení kodeků přijal (jinak by se vůbec nenačetl)
+  docker exec "$AST" sh -c "
+    ep=\$(asterisk -rx 'pjsip show endpoints' | awk '/^ Endpoint:/ && !/</ {print \$2; exit}');
+    [ -n \"\$ep\" ] &&
+    asterisk -rx \"pjsip show endpoint \$ep\" | grep -Eq 'allow +: \\(g722\\|alaw\\|ulaw\\)' &&
+    asterisk -rx \"pjsip show endpoint \$ep\" | grep -Eq 'codec_prefs_incoming_offer +: prefer:configured'"
+}
+dstep "zvuk z telefonu jde přes jitter buffer, kodek 16 kHz je k dispozici" ast_voice_quality_check
 ast_journal_check() {
   docker exec "$AST" sh -c \
     '/usr/local/phone21/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/phone21/journal.jsonl'
