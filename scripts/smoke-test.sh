@@ -567,6 +567,29 @@ ast_voice_quality_check() {
     asterisk -rx \"pjsip show endpoint \$ep\" | grep -Eq 'codec_prefs_incoming_offer +: prefer:configured'"
 }
 dstep "zvuk z telefonu jde přes jitter buffer, kodek 16 kHz je k dispozici" ast_voice_quality_check
+early_media_patch_check() {
+  # patch 0002 je v sestaveném ovladači modemu (řetězce existují jen s ním)
+  docker run --rm --entrypoint sh phone21-pbx:smoke -c '
+    so=$(find /usr/lib -name chan_quectel.so -path "*asterisk*" | head -1)
+    [ -n "$so" ] || { echo "ovladač modemu v obraze chybí"; exit 1; }
+    grep -aq QUECTEL_EARLY_AUDIO "$so" || { echo "chybí volba early media"; exit 1; }
+    grep -aq "Early audio requested" "$so" || { echo "chybí časná aktivace zvuku"; exit 1; }'
+}
+dstep "ovladač modemu má patch early media (0002)" early_media_patch_check
+early_media_dialplan_check() {
+  # oba vzory odchozích hovorů zapínají early media (s vypínačem v AstDB)
+  # a po Dial jdou do vyhodnocení důvodu konce
+  docker exec "$AST" sh -c "
+    out=\$(asterisk -rx 'dialplan show from-softphone');
+    [ \$(printf '%s\n' \"\$out\" | grep -c '_QUECTEL_EARLY_AUDIO=.*phone21/early_media') -eq 2 ] || { echo 'early media chybí u odchozích vzorů'; exit 1; }
+    [ \$(printf '%s\n' \"\$out\" | grep -c 'Goto(gsm-dial-end,s,1)') -eq 2 ] || { echo 'po Dial chybí vyhodnocení konce'; exit 1; }
+    ! printf '%s\n' \"\$out\" | grep -A1 'Dial(Quectel' | grep -q 'Hangup()' || { echo 'po Dial zůstal holý Hangup()'; exit 1; }
+    end=\$(asterisk -rx 'dialplan show s@gsm-dial-end');
+    for c in 'Hangup(17)' 'Hangup(16)' 'Hangup(1)' 'Hangup(19)' 'Hangup(34)' 'Hangup(31)' 'HANGUPCAUSE'; do
+      printf '%s\n' \"\$end\" | grep -qF \"\$c\" || { echo \"gsm-dial-end: chybí \$c\"; exit 1; }
+    done"
+}
+dstep "dialplan: early media u odchozích hovorů a srozumitelný důvod konce" early_media_dialplan_check
 ast_journal_check() {
   docker exec "$AST" sh -c \
     '/usr/local/phone21/sms-queue.sh journal smoke-test "$(printf %s "{}" | base64)" && grep -q smoke-test /var/lib/phone21/journal.jsonl'

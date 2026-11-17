@@ -1,0 +1,164 @@
+Phone21: zvuk z modemu u odchozího hovoru už před přijetím (early media)
+
+U odchozího hovoru se zvuková cesta (AT+CPCMREG=1) zapíná už ve stavu
+DIALING (po ATD, jak to výrobce popisuje pro vyzváněcí tón), případně
+znovu při ALERTING, když první pokus selže. Volající tak slyší skutečné
+vyzvánění a hlášky operátora. Příznak CALL_FLAG_EARLY_AUDIO brání druhé
+aktivaci ve stavu ACTIVE (na chybu modemu by ji ovladač ve stavu ACTIVE
+opakoval dokola). Výsledky BUSY / NO ANSWER se uloží jako příčina ukončení.
+
+Zapíná se PER HOVOR proměnnou kanálu QUECTEL_EARLY_AUDIO (dialplan ji
+nastaví zděděnou: Set(_QUECTEL_EARLY_AUDIO=yes)). Bez ní se ovladač chová
+přesně jako bez patche. Příchozí hovory a konec hovoru (CPCMREG=0) beze změny.
+
+diff --git a/src/at_response.c b/src/at_response.c
+index 71c488c..c2cbaaa 100644
+--- a/src/at_response.c
++++ b/src/at_response.c
+@@ -725,6 +725,10 @@ static int at_response_error(struct pvt* const pvt, const at_res_t at_res, const
+                 at_enqueue_cpcmreg(task->cpvt, 1);
+             } else {
+                 at_err_response_err(pvt, ecmd, "Could not activate audio stream");
++                /* Phone21: early activation failed - let ALERTING/ACTIVE try again */
++                if (task->cpvt != &pvt->sys_chan) {
++                    CPVT_RESET_FLAG(task->cpvt, CALL_FLAG_EARLY_AUDIO);
++                }
+             }
+             break;
+ 
+@@ -902,6 +906,21 @@ e_return:
+     return -1;
+ }
+ 
++/* Phone21: BUSY / NO ANSWER result code of ATD as the hangup cause of an
++ * unanswered outgoing call (only calls with early audio allowed). The hangup
++ * itself is still queued on release, so the network announcement is not cut. */
++static void early_audio_set_cause(struct pvt* const pvt, const int cause)
++{
++    struct cpvt* cpvt;
++    AST_LIST_TRAVERSE(&pvt->chans, cpvt, entry) {
++        if (cpvt->channel && CPVT_DIR_OUTGOING(cpvt) && CPVT_TEST_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO_ON) &&
++            (cpvt->state == CALL_STATE_INIT || cpvt->state == CALL_STATE_DIALING || cpvt->state == CALL_STATE_ALERTING)) {
++            ast_debug(1, "[%s] Outgoing call idx:%d - hangup cause %d\n", PVT_ID(pvt), cpvt->call_idx, cause);
++            ast_channel_hangupcause_set(cpvt->channel, cause);
++        }
++    }
++}
++
+ static int start_pbx(struct pvt* const pvt, const char* const number, const int call_idx, const call_state_t state)
+ {
+     /* TODO: pass also Subscriber number or other DID info for exten  */
+@@ -1013,7 +1032,10 @@ static void handle_clcc(struct pvt* const pvt, const unsigned int call_idx, cons
+ 
+     switch (state) {
+         case CALL_STATE_ACTIVE:
+-            if (cpvt && pvt->is_simcom && CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE && pvt->has_voice) {
++            if (cpvt && CPVT_TEST_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO)) {
++                /* Phone21: audio already started before answer, do not activate twice */
++                CPVT_RESET_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO);
++            } else if (cpvt && pvt->is_simcom && CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE && pvt->has_voice) {
+                 at_enqueue_cpcmreg(cpvt, 1);
+             }
+             break;
+@@ -2869,6 +2891,7 @@ int at_response(struct pvt* const pvt, const struct ast_str* const response, con
+ 
+         case RES_BUSY:
+             ast_debug(2, "[%s] Receive BUSY\n", PVT_ID(pvt));
++            early_audio_set_cause(pvt, AST_CAUSE_USER_BUSY);
+             return 0;
+ 
+         case RES_NO_DIALTONE:
+@@ -2877,6 +2900,7 @@ int at_response(struct pvt* const pvt, const struct ast_str* const response, con
+ 
+         case RES_NO_ANSWER:
+             ast_debug(2, "[%s] Receive NO ANSWER\n", PVT_ID(pvt));
++            early_audio_set_cause(pvt, AST_CAUSE_NO_ANSWER);
+             return 0;
+ 
+         case RES_NO_CARRIER:
+diff --git a/src/channel.c b/src/channel.c
+index 873f2b9..c3eec26 100644
+--- a/src/channel.c
++++ b/src/channel.c
+@@ -240,6 +240,9 @@ static int channel_call(struct ast_channel* channel, const char* dest, attribute
+         return -1;
+     }
+ 
++    /* Phone21: early audio only when the dialplan asks for it (channel is locked by ast_call) */
++    const int early_audio = ast_true(pbx_builtin_getvar_helper(channel, "QUECTEL_EARLY_AUDIO"));
++
+     SCOPED_MUTEX(pvt_lock, &pvt->lock);
+ 
+     // FIXME: check if bridged on same device with CALL_FLAG_HOLD_OTHER
+@@ -249,6 +252,9 @@ static int channel_call(struct ast_channel* channel, const char* dest, attribute
+     }
+ 
+     CPVT_SET_FLAGS(cpvt, opts);
++    if (early_audio) {
++        CPVT_SET_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO_ON);
++    }
+     ast_debug(1, "[%s] Calling %s on %s\n", PVT_ID(pvt), dest, ast_channel_name(channel));
+ 
+     int clir = 0;
+diff --git a/src/cpvt.c b/src/cpvt.c
+index 7846621..ffd8023 100644
+--- a/src/cpvt.c
++++ b/src/cpvt.c
+@@ -279,6 +279,27 @@ static void change_state_no_channel(struct cpvt* const cpvt, struct pvt* const p
+     };
+ }
+ 
++/* Phone21: outgoing call - start PCM audio from the modem before the callee
++ * answers, so the caller hears the real ringback and network announcements
++ * (early media; SIMCom documents AT+CPCMREG=1 after ATD for the ringback).
++ * SimCom with serial PCM only, and only when the dialplan allowed it.
++ * CALL_FLAG_EARLY_AUDIO prevents a second activation on CALL_STATE_ACTIVE. */
++static void early_audio_start(struct cpvt* const cpvt, struct pvt* const pvt)
++{
++    if (!CPVT_DIR_OUTGOING(cpvt) || !CPVT_TEST_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO_ON) || CPVT_TEST_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO)) {
++        return;
++    }
++    if (!pvt->is_simcom || CONF_UNIQ(pvt, uac) != TRIBOOL_FALSE || !pvt->has_voice) {
++        return;
++    }
++    if (at_enqueue_cpcmreg(cpvt, 1)) {
++        ast_log(LOG_WARNING, "[%s] Unable to request early audio - idx:%d\n", PVT_ID(pvt), cpvt->call_idx);
++        return;
++    }
++    CPVT_SET_FLAG(cpvt, CALL_FLAG_EARLY_AUDIO);
++    ast_debug(1, "[%s] Early audio requested - idx:%d\n", PVT_ID(pvt), cpvt->call_idx);
++}
++
+ static void change_state(struct cpvt* const cpvt, struct pvt* const pvt, struct ast_channel* const channel, const call_state_t oldstate,
+                          const call_state_t newstate, const short call_idx, const int cause)
+ {
+@@ -289,12 +310,14 @@ static void change_state(struct cpvt* const cpvt, struct pvt* const pvt, struct
+             cpvt_call_activate(cpvt);
+             cpvt_control(cpvt, AST_CONTROL_PROGRESS);
+             ast_setstate(channel, AST_STATE_DIALING);
++            early_audio_start(cpvt, pvt);
+             break;
+ 
+         case CALL_STATE_ALERTING:
+             cpvt_call_activate(cpvt);
+             cpvt_control(cpvt, AST_CONTROL_RINGING);
+             ast_setstate(channel, AST_STATE_RINGING);
++            early_audio_start(cpvt, pvt);
+             break;
+ 
+         case CALL_STATE_INCOMING:
+diff --git a/src/cpvt.h b/src/cpvt.h
+index ffcb2df..d4a3ad5 100644
+--- a/src/cpvt.h
++++ b/src/cpvt.h
+@@ -47,7 +47,9 @@ typedef enum {
+     CALL_FLAG_MULTIPARTY       = 256,  /*!< internal, CLCC mpty is 1 */
+     CALL_FLAG_DIRECTION        = 512,  /*!< call direction */
+     CALL_FLAG_LOCAL_CHANNEL    = 1024, /*!< local channel flag */
+-    CALL_FLAG_INTERNAL_REQUEST = 2048  /*!< internal request */
++    CALL_FLAG_INTERNAL_REQUEST = 2048, /*!< internal request */
++    CALL_FLAG_EARLY_AUDIO_ON   = 4096, /*!< Phone21: dialplan allowed early audio for this outgoing call */
++    CALL_FLAG_EARLY_AUDIO      = 8192  /*!< Phone21: AT+CPCMREG=1 already requested before ACTIVE */
+ } call_flag_t;
+ 
+ #define CALL_DIR_INCOMING 1u
