@@ -321,8 +321,15 @@ watchdog_loop() {
   local fails=0 stuck=0 thr="${FAIL_THRESHOLD:-3}" interval="${WATCHDOG_INTERVAL:-30}"
   local out verdict size audio_bad=0 caps_bad=0 caps_fix=0
   # chyby ovladače, po kterých zůstane zvukový kanál modemu rozbitý
+  # (12. 11.: CHLD=2x, CHLD=1x, CPCMREG=0). CPCMREG=1 záměrně ne: časná
+  # aktivace zvuku před přijetím smí selhat (zkusí se znovu) a v ACTIVE
+  # ovladač neúspěch opakuje jen v ladicím výpisu — chycený řádek by po
+  # takovém hovoru zbytečně restartoval modem. Vzdáváme se tím resetu po
+  # hovoru, kde CPCMREG=1 selhávalo celou dobu (koncový řádek po uvolnění
+  # od časného selhání nerozlišíme). Timeout CPCMREG=1 dál restartuje
+  # ovladač sám (příkaz nemá příznak IGNORE).
   local logf=/var/log/asterisk/messages.log logpos
-  local audio_re='\[quectel0\]\[AT\+(CHLD=[12]x|CPCMREG=[01])\] ⍻ (Answer failed|Error sending hangup|Could not (de)?activate audio stream)'
+  local audio_re='\[quectel0\]\[AT\+(CHLD=[12]x\] ⍻ (Answer failed|Error sending hangup)|CPCMREG=0\] ⍻ Could not deactivate audio stream)'
   logpos=$(stat -c %s "$logf" 2>/dev/null || echo 0)
   # pauza po marném restartu roste, dokud se modem nezotaví
   local at_dev="${AT_DEVICE:-/dev/ttyUSB2}" nomodem=0

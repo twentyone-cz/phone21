@@ -8,8 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build git ca-certificates \
       asterisk-dev libsqlite3-dev libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
-# plný clone včetně tagů (CMake si bere verzi z `git describe`)
-RUN git clone https://github.com/RoEdAl/asterisk-chan-quectel /src
+# plný clone včetně tagů (CMake si bere verzi z `git describe`), pevně na
+# revizi, proti které je zrevidovaný patch 0002 — nový upstream commit by
+# jinak prošel `git apply` a změnil chování bez kontroly. Pin je ve stejném
+# RUN jako clone, aby změna revize nevzala starý clone z cache.
+RUN git clone https://github.com/RoEdAl/asterisk-chan-quectel /src \
+    && git -C /src checkout --quiet 5552c365bfb319eed7cbbf6300a67028ab70db9e
 WORKDIR /src
 # Lokální patche; build context je kořen repa.
 COPY docker/patches/ /patches/

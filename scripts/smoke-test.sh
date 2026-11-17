@@ -578,11 +578,12 @@ early_media_patch_check() {
 dstep "ovladač modemu má patch early media (0002)" early_media_patch_check
 early_media_dialplan_check() {
   # oba vzory odchozích hovorů zapínají early media (s vypínačem v AstDB)
-  # a po Dial jdou do vyhodnocení důvodu konce
+  # a po Dial jdou do vyhodnocení důvodu konce (Gosub, ne Goto — jinak by
+  # historie hovorů ukázala místo čísla „s“)
   docker exec "$AST" sh -c "
     out=\$(asterisk -rx 'dialplan show from-softphone');
     [ \$(printf '%s\n' \"\$out\" | grep -c '_QUECTEL_EARLY_AUDIO=.*phone21/early_media') -eq 2 ] || { echo 'early media chybí u odchozích vzorů'; exit 1; }
-    [ \$(printf '%s\n' \"\$out\" | grep -c 'Goto(gsm-dial-end,s,1)') -eq 2 ] || { echo 'po Dial chybí vyhodnocení konce'; exit 1; }
+    [ \$(printf '%s\n' \"\$out\" | grep -c 'Gosub(gsm-dial-end,s,1)') -eq 2 ] || { echo 'po Dial chybí vyhodnocení konce'; exit 1; }
     ! printf '%s\n' \"\$out\" | grep -A1 'Dial(Quectel' | grep -q 'Hangup()' || { echo 'po Dial zůstal holý Hangup()'; exit 1; }
     end=\$(asterisk -rx 'dialplan show s@gsm-dial-end');
     for c in 'Hangup(17)' 'Hangup(16)' 'Hangup(1)' 'Hangup(19)' 'Hangup(34)' 'Hangup(31)' 'HANGUPCAUSE'; do

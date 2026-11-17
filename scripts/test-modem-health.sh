@@ -74,4 +74,14 @@ wait
 check "modem se nepřipraví = vyprší strop" "timeout" "$r"
 rm -rf "$T"
 
+# sken messages.log v hlídce (entrypoint.sh): reset modemu jen po chybách,
+# které rozbijí zvukový kanál; neúspěšná časná aktivace zvuku (CPCMREG=1) ne
+audio_re="$(sed -n "s/^ *local audio_re='\(.*\)'$/\1/p" "$ROOT/docker/entrypoint.sh")"
+check "hlídka: vzor chyb zvuku nalezen" "1" "$(printf '%s\n' "$audio_re" | grep -c .)"
+audio_hit() { printf '[2026-11-17 10:00:00] ERROR[1][C-1] at_response.c: %s\n' "$1" | grep -qE "$audio_re" && echo reset || echo nic; }
+check "hlídka: CHLD=2x Answer failed" "reset" "$(audio_hit '[quectel0][AT+CHLD=2x] ⍻ Answer failed for call idx:2')"
+check "hlídka: CHLD=1x Error sending hangup" "reset" "$(audio_hit '[quectel0][AT+CHLD=1x] ⍻ Error sending hangup for call idx:1')"
+check "hlídka: CPCMREG=0 Could not deactivate" "reset" "$(audio_hit '[quectel0][AT+CPCMREG=0] ⍻ Could not deactivate audio stream')"
+check "hlídka: CPCMREG=1 Could not activate = bez resetu" "nic" "$(audio_hit '[quectel0][AT+CPCMREG=1] ⍻ Could not activate audio stream')"
+
 exit $fail
