@@ -1,0 +1,220 @@
+Phone21: časná aktivace zvuku (patch 0002) bez restartu modemu, odolnější fronta AT
+
+- AT+CPCMREG=1 před přijetím (DIALING/ALERTING) je IGNORE: timeout nebo
+  ERROR jen zaloguje „Could not activate audio stream“, shodí příznak
+  CALL_FLAG_EARLY_AUDIO a aktivaci zkusí ALERTING/ACTIVE (jako dosud).
+  Bez IGNORE by timeout ukončil monitor, hovor by spadl s příčinou 31
+  a modem se 15 s připojoval znovu.
+- cmd_timeout jedná jen při skutečně prošlé lhůtě odeslané hlavy fronty
+  (monitor ho pro jeden timeout může zařadit dvakrát) a příznak IGNORE
+  čte dřív, než at_response() úlohu uvolní.
+- at_response: pozdní OK/ERROR, když hlava fronty ještě nebyla odeslána,
+  patří příkazu odstraněnému po timeoutu — ignoruje se (jinak by třeba
+  „potvrdil“ neodeslaný AT+CHUP a hovor by v síti zvonil dál).
+- OK na časnou aktivaci hovoru, který mezitím skončil (úloha přepojená na
+  sys_chan, žádný hovor, AT+CPCMREG=0 nečeká) → AT+CPCMREG=0.
+- Hovory s časným zvukem: opakování AT+CPCMREG=1 v ACTIVE po chybě nejvýš
+  3× a s IGNORE; opakování u ostatních hovorů beze změny proti upstreamu.
+  Kontrola lhůty v cmd_timeout, filtr pozdních odpovědí a vypnutí PCM po
+  pozdní aktivaci platí pro všechny hovory (záměrně).
+
+Známé meze: po timeoutu IGNORE příkazu čeká další příkaz (třeba AT+CHUP)
+na nejbližší zprávu z modemu nebo na ping (nejhůř ~15 s); filtr pozdních
+odpovědí zabere jen, dokud hlava fronty neodešla. Obojí jen když modem na
+AT+CPCMREG=1 do 5 s vůbec neodpoví (v provozu zatím nepozorováno).
+
+diff --git a/src/at_command.c b/src/at_command.c
+index c20a8b3..bee8653 100644
+--- a/src/at_command.c
++++ b/src/at_command.c
+@@ -1855,6 +1855,25 @@ int at_enqueue_cpcmreg(struct cpvt* cpvt, int reg)
+     return 0;
+ }
+ 
++/* Phone21: AT+CPCMREG=1 for calls with early audio (before the call is
++ * answered, and the bounded retry in ACTIVE). Flagged IGNORE: a modem that
++ * does not answer must not stop the monitor (a timeout of a non-IGNORE
++ * command restarts the device and drops the call); the CMD_AT_CPCMREG1 error
++ * branch still runs. */
++int at_enqueue_cpcmreg1_ignore(struct cpvt* cpvt)
++{
++    DECLARE_AT_CMD(cpcmreg_1, "+CPCMREG=1");
++
++    static const at_queue_cmd_t cmd1 = ATQ_CMD_DECLARE_STI(CMD_AT_CPCMREG1, cpcmreg_1);
++
++    if (at_queue_insert_const(cpvt, &cmd1, 1u, 1)) {
++        chan_quectel_err = E_QUEUE;
++        return -1;
++    }
++
++    return 0;
++}
++
+ int at_cpcmreg_immediately(struct pvt* pvt, int reg)
+ {
+     DECLARE_NAKED_AT_CMD(cpcmreg_0, "+CPCMREG=0,0");
+diff --git a/src/at_command.h b/src/at_command.h
+index 4e7e194..9e586d8 100644
+--- a/src/at_command.h
++++ b/src/at_command.h
+@@ -190,6 +190,7 @@ int at_enqueue_cmicgain(struct cpvt* cpvt, int gain);
+ int at_enqueue_query_coutgain(struct cpvt* cpvt);
+ int at_enqueue_coutgain(struct cpvt* cpvt, int gain);
+ int at_enqueue_cpcmreg(struct cpvt*, int);
++int at_enqueue_cpcmreg1_ignore(struct cpvt*);
+ int at_cpcmreg_immediately(struct pvt*, int);
+ int at_enqueue_cpcmfrm(struct cpvt*, int);
+ int at_enqueue_csq(struct cpvt*);
+diff --git a/src/at_queue.c b/src/at_queue.c
+index 69c3910..c4da13b 100644
+--- a/src/at_queue.c
++++ b/src/at_queue.c
+@@ -325,6 +325,21 @@ const struct at_queue_task* at_queue_head_task(const struct pvt* pvt) { return A
+ 
+ const at_queue_cmd_t* at_queue_head_cmd(const struct pvt* pvt) { return at_queue_task_cmd(at_queue_head_task(pvt)); }
+ 
++/* Phone21: is a task starting with this command waiting in the queue
++ * (behind the head)? */
++int at_queue_pending_cmd(const struct pvt* pvt, at_cmd_t cmd)
++{
++    const at_queue_task_t* task;
++    const at_queue_task_t* const head = AST_LIST_FIRST(&pvt->at_queue);
++
++    AST_LIST_TRAVERSE(&pvt->at_queue, task, entry) {
++        if (task != head && task->cmdsno && task->cmds[0].cmd == cmd) {
++            return 1;
++        }
++    }
++    return 0;
++}
++
+ int at_queue_timeout(const struct pvt* pvt, int* diff)
+ {
+     const at_queue_cmd_t* cmd = at_queue_head_cmd(pvt);
+diff --git a/src/at_queue.h b/src/at_queue.h
+index 126f06c..c0ea873 100644
+--- a/src/at_queue.h
++++ b/src/at_queue.h
+@@ -113,6 +113,7 @@ void at_queue_flush(struct pvt* pvt);
+ const at_queue_task_t* at_queue_head_task(const struct pvt* pvt);
+ const at_queue_cmd_t* at_queue_head_cmd(const struct pvt* pvt);
+ int at_queue_timeout(const struct pvt* pvt, int* diff);
++int at_queue_pending_cmd(const struct pvt* pvt, at_cmd_t cmd);
+ int at_queue_run(struct pvt* pvt);
+ int at_queue_run_immediately(struct pvt* pvt);
+ 
+diff --git a/src/at_response.c b/src/at_response.c
+index c2cbaaa..c8651da 100644
+--- a/src/at_response.c
++++ b/src/at_response.c
+@@ -346,6 +346,15 @@ static int at_response_ok(struct pvt* const pvt, const at_res_t at_res, const at
+ 
+         case CMD_AT_CPCMREG1:
+             at_ok_response_dbg(3, pvt, ecmd, NULL);
++            /* Phone21: the call of an early activation is gone (task relinked
++             * to sys_chan), no other call needs the audio stream and no
++             * AT+CPCMREG=0 is waiting (a second one could answer ERROR, which
++             * the watchdog treats as a broken audio channel) */
++            if (task->cpvt == &pvt->sys_chan && PVT_NO_CHANS(pvt) && pvt->is_simcom && CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE &&
++                !at_queue_pending_cmd(pvt, CMD_AT_CPCMREG0)) {
++                ast_debug(1, "[%s] Audio stream activated after the call was released - deactivating\n", PVT_ID(pvt));
++                at_enqueue_cpcmreg(&pvt->sys_chan, 0);
++            }
+             if (!pvt->initialized) {
+                 pvt->initialized = 1;
+                 ast_verb(3, "[%s] SimCom initialized and ready\n", PVT_ID(pvt));
+@@ -720,9 +729,16 @@ static int at_response_error(struct pvt* const pvt, const at_res_t at_res, const
+             break;
+ 
+         case CMD_AT_CPCMREG1:
+-            if (CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE && CPVT_IS_ACTIVE(task->cpvt)) {
++            if (CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE && CPVT_IS_ACTIVE(task->cpvt) && !CPVT_TEST_FLAG(task->cpvt, CALL_FLAG_EARLY_AUDIO_ON)) {
+                 at_err_response_dbg(3, pvt, ecmd, "Trying to activate audio stream again");
+                 at_enqueue_cpcmreg(task->cpvt, 1);
++            } else if (CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE && CPVT_IS_ACTIVE(task->cpvt) && task->cpvt->pcm_retries < 3) {
++                /* Phone21: early-audio call - the stream may be active already
++                 * (late OK of the early activation, then ERROR forever) and a
++                 * timeout must not restart the device: bounded, IGNORE */
++                task->cpvt->pcm_retries++;
++                at_err_response_dbg(3, pvt, ecmd, "Trying to activate audio stream again");
++                at_enqueue_cpcmreg1_ignore(task->cpvt);
+             } else {
+                 at_err_response_err(pvt, ecmd, "Could not activate audio stream");
+                 /* Phone21: early activation failed - let ALERTING/ACTIVE try again */
+@@ -2780,6 +2796,16 @@ int at_response(struct pvt* const pvt, const struct ast_str* const response, con
+     const at_queue_cmd_t* const ecmd  = at_queue_task_cmd(task);
+     show_response(pvt, ecmd, response, at_res);
+ 
++    /* Phone21: after the timeout of an IGNORE command the next head stays
++     * unsent until something runs the queue; an OK/ERROR arriving now is the
++     * late answer of the removed command and must not be paired with the
++     * head (it would e.g. "confirm" an AT+CHUP that was never sent).
++     * response_taskproc runs the queue afterwards, so the head goes out. */
++    if (ecmd && ecmd->length && (at_res == RES_OK || at_res == RES_ERROR || at_res == RES_CMS_ERROR)) {
++        ast_log(LOG_NOTICE, "[%s] Late %s ignored - %s not sent yet\n", PVT_ID(pvt), at_res2str(at_res), at_cmd2str(ecmd->cmd));
++        return 0;
++    }
++
+     switch (at_res) {
+         case RES_BOOT:
+         case RES_CSSI:
+diff --git a/src/cpvt.c b/src/cpvt.c
+index ffd8023..ad669ec 100644
+--- a/src/cpvt.c
++++ b/src/cpvt.c
+@@ -292,7 +292,7 @@ static void early_audio_start(struct cpvt* const cpvt, struct pvt* const pvt)
+     if (!pvt->is_simcom || CONF_UNIQ(pvt, uac) != TRIBOOL_FALSE || !pvt->has_voice) {
+         return;
+     }
+-    if (at_enqueue_cpcmreg(cpvt, 1)) {
++    if (at_enqueue_cpcmreg1_ignore(cpvt)) {
+         ast_log(LOG_WARNING, "[%s] Unable to request early audio - idx:%d\n", PVT_ID(pvt), cpvt->call_idx);
+         return;
+     }
+diff --git a/src/cpvt.h b/src/cpvt.h
+index d4a3ad5..5207a57 100644
+--- a/src/cpvt.h
++++ b/src/cpvt.h
+@@ -74,6 +74,8 @@ typedef struct cpvt {
+ 
+     struct mixstream mixstream; /*!< mix stream */
+ 
++    unsigned char pcm_retries; /*!< Phone21: AT+CPCMREG=1 retries in ACTIVE (early-audio calls) */
++
+     void* buffer;           /*!< audio read buffer */
+     struct ast_frame frame; /*!< voice frame */
+ } cpvt_t;
+diff --git a/src/monitor_thread.c b/src/monitor_thread.c
+index 63a1a32..4a015b4 100644
+--- a/src/monitor_thread.c
++++ b/src/monitor_thread.c
+@@ -77,18 +77,28 @@ static int restart_monitor_taskproc(void* tpdata) { return PVT_TASKPROC_TRYLOCK_
+ 
+ static void cmd_timeout(struct pvt* const pvt)
+ {
++    /* Phone21: the monitor may queue this task twice for one timeout; act
++     * only when the head command was sent and its time really ran out */
++    int t;
++    if (at_queue_timeout(pvt, &t) || t > 0) {
++        return;
++    }
++
+     const struct at_queue_cmd* const ecmd = at_queue_head_cmd(pvt);
+     if (!ecmd || ecmd->length) {
+         return;
+     }
+ 
++    /* Phone21: at_response() removes (frees) the timed out task, ecmd too */
++    const int ignore = (ecmd->flags & ATQ_CMD_FLAG_IGNORE) ? 1 : 0;
++
+     if (at_response(pvt, &pvt->empty_str, RES_TIMEOUT)) {
+         ast_log(LOG_ERROR, "[%s] Fail to handle response\n", PVT_ID(pvt));
+         pvt->terminate_monitor = 1;
+         return;
+     }
+ 
+-    if (ecmd->flags & ATQ_CMD_FLAG_IGNORE) {
++    if (ignore) {
+         return;
+     }
+ 

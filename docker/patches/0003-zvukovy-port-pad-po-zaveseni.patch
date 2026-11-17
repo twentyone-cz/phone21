@@ -1,0 +1,113 @@
+Phone21: pád ústředny po zavěšení prvního hovoru (zvukový port modemu)
+
+Ovladač otevírá zvukový port poprvé ještě před rozpoznáním modemu SimCom,
+tedy bez CLOCAL. Když modem po prvním hovoru shodí DCD, jádro tty zavěsí
+a monitor dostane EIO. Port se pak otevře znovu (už s CLOCAL) a jeho fd se
+nastaví všem hovorům v seznamu — i hovoru, který Asterisk už zavěsil
+a čeká na uvolnění modemem (cpvt->channel == NULL) → dereference NULL,
+segfault celého procesu (17. 11. 2026, první hovor po startu ústředny).
+
+- reopen_audio_port: fd jen hovorům s kanálem; znovu otevřený port
+  neblokující jako po prvním otevření (jinak channel_read může viset
+  v read() se zámkem pvt),
+- zvukový port vždy s CLOCAL (první otevření i znovuotevření) — EIO po
+  hovoru ani reopen už nenastanou,
+- protože reopen (s TCSAFLUSH) mezi hovory odpadl, vstup portu se vyprázdní
+  na začátku hovoru — nový hovor nezačne zbytkem zvuku z minulého,
+- pvt_disconnect: RELEASED hovor uvolní, procházet seznam bezpečně.
+
+diff --git a/src/chan_quectel.c b/src/chan_quectel.c
+index 195ec39..8bc3a78 100644
+--- a/src/chan_quectel.c
++++ b/src/chan_quectel.c
+@@ -34,6 +34,7 @@
+  */
+ 
+ #include <signal.h>
++#include <termios.h> /* tcflush() */
+ 
+ #include "ast_config.h"
+ 
+@@ -105,11 +106,13 @@ void pvt_disconnect(struct pvt* pvt)
+ {
+     if (!PVT_NO_CHANS(pvt)) {
+         struct cpvt* cpvt;
+-        AST_LIST_TRAVERSE(&(pvt->chans), cpvt, entry) {
++        /* Phone21: RELEASED frees cpvt (cpvt_free), keep the next pointer */
++        AST_LIST_TRAVERSE_SAFE_BEGIN(&(pvt->chans), cpvt, entry) {
+             at_hangup_immediately(cpvt, AST_CAUSE_NORMAL_UNSPECIFIED);
+             CPVT_RESET_FLAG(cpvt, CALL_FLAG_NEED_HANGUP);
+             cpvt_change_state(cpvt, CALL_STATE_RELEASED, AST_CAUSE_NORMAL_UNSPECIFIED);
+         }
++        AST_LIST_TRAVERSE_SAFE_END;
+     }
+ 
+     if (pvt->initialized) {
+@@ -238,7 +241,11 @@ static void pvt_start(struct pvt* const pvt)
+     } else {
+         // TODO: delay until device activate voice call or at pvt_on_create_1st_channel()
+         ast_verb(3, "[%s] Trying to open audio port %s...\n", PVT_ID(pvt), CONF_UNIQ(pvt, audio_tty));
+-        pvt->audio_fd = tty_open(CONF_UNIQ(pvt, audio_tty), pvt->is_simcom);
++        /* Phone21: is_simcom is not known yet (detected during init), so the
++         * port would be opened without CLOCAL; the kernel then hangs the tty
++         * up when the modem drops DCD after the first call (EIO, reopen).
++         * The reopen after that uses CLOCAL anyway (typ 1 on SimCom). */
++        pvt->audio_fd = tty_open(CONF_UNIQ(pvt, audio_tty), 1);
+         if (pvt->audio_fd < 0) {
+             goto cleanup_datafd;
+         }
+@@ -450,6 +457,13 @@ static void dev_manager_stop(struct public_state* const state)
+ 
+ void pvt_on_create_1st_channel(struct pvt* pvt)
+ {
++    /* Phone21: drop PCM left in the tty buffers from the previous call
++     * (nobody reads the port between calls), so the new call does not start
++     * with a burst of old audio */
++    if (CONF_UNIQ(pvt, uac) == TRIBOOL_FALSE && pvt->audio_fd >= 0) {
++        tcflush(pvt->audio_fd, TCIFLUSH);
++    }
++
+     const struct ast_format* const fmt = pvt_get_audio_format(pvt);
+     const size_t silence_buf_size      = 2u * pvt_get_audio_frame_size(PTIME_PLAYBACK, fmt);
+     pvt->silence_buf                   = ast_calloc(1, silence_buf_size + AST_FRIENDLY_OFFSET);
+diff --git a/src/monitor_thread.c b/src/monitor_thread.c
+index 5df7820..63a1a32 100644
+--- a/src/monitor_thread.c
++++ b/src/monitor_thread.c
+@@ -2,6 +2,7 @@
+     monitor_thread.c
+ */
+ 
++#include <fcntl.h>   /* fcntl() O_NONBLOCK */
+ #include <signal.h>  /* SIGURG */
+ #include <termios.h> /* struct termios tcgetattr() tcsetattr()  */
+ 
+@@ -99,12 +100,26 @@ static int cmd_timeout_taskproc(void* tpdata) { return PVT_TASKPROC_TRYLOCK_AND_
+ static int reopen_audio_port(struct pvt* pvt)
+ {
+     tty_close_lck(CONF_UNIQ(pvt, audio_tty), pvt->audio_fd, 0, 0);
+-    pvt->audio_fd = tty_open(CONF_UNIQ(pvt, audio_tty), pvt->is_simcom);
++    /* Phone21: CLOCAL like the first open (pvt_start) on every modem */
++    pvt->audio_fd = tty_open(CONF_UNIQ(pvt, audio_tty), 1);
++
++    if (pvt->audio_fd >= 0) {
++        /* Phone21: non-blocking like after the first open (pvt_start),
++         * otherwise channel_read() may block in read() holding pvt->lock */
++        const int flags = fcntl(pvt->audio_fd, F_GETFL);
++        if (flags != -1) {
++            fcntl(pvt->audio_fd, F_SETFL, flags | O_NONBLOCK);
++        }
++    }
+ 
+     if (!PVT_NO_CHANS(pvt)) {
+         struct cpvt* cpvt;
+         AST_LIST_TRAVERSE(&(pvt->chans), cpvt, entry) {
+-            ast_channel_set_fd(cpvt->channel, 0, pvt->audio_fd);
++            /* Phone21: a call hung up by Asterisk stays in the list with
++             * channel == NULL until the modem reports its release */
++            if (cpvt->channel) {
++                ast_channel_set_fd(cpvt->channel, 0, pvt->audio_fd);
++            }
+         }
+     }
+ 

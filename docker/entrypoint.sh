@@ -326,8 +326,10 @@ watchdog_loop() {
   # ovladač neúspěch opakuje jen v ladicím výpisu — chycený řádek by po
   # takovém hovoru zbytečně restartoval modem. Vzdáváme se tím resetu po
   # hovoru, kde CPCMREG=1 selhávalo celou dobu (koncový řádek po uvolnění
-  # od časného selhání nerozlišíme). Timeout CPCMREG=1 dál restartuje
-  # ovladač sám (příkaz nemá příznak IGNORE).
+  # od časného selhání nerozlišíme). Timeout CPCMREG=1 v ACTIVE u hovoru
+  # bez časného zvuku dál restartuje ovladač sám (příkaz bez IGNORE); časná
+  # aktivace a její omezená opakování jsou od patche 0004 IGNORE — tichý
+  # hovor po jejich selhání hlídka ani ovladač nezachytí.
   local logf=/var/log/asterisk/messages.log logpos
   local audio_re='\[quectel0\]\[AT\+(CHLD=[12]x\] ⍻ (Answer failed|Error sending hangup)|CPCMREG=0\] ⍻ Could not deactivate audio stream)'
   logpos=$(stat -c %s "$logf" 2>/dev/null || echo 0)
