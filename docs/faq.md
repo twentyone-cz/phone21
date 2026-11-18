@@ -2,22 +2,22 @@
 
 ## Android dovolí jen jednu VPN — jak vedle miniserveru provozovat komerční VPN?
 
-Android povolí jednu aktivní VPN na profil a aplikace
-privátní sítě to místo zabere. Obojí naráz proto nejde spustit vedle sebe.
+Android povolí jednu aktivní VPN na profil a aplikace privátní sítě to
+místo zabere (při každém stupni přístupu). Obojí naráz proto v jednom
+profilu nejde.
 
 Co s tím:
 
-- **Výstupní uzel uvnitř privátní sítě** — provoz telefonu jde ven přes
-  vybrané zařízení v síti a jednu aplikaci tím zastanou obě role. Od verze
-  0.9.31 to zvládne i sám miniserver: přepni přístup na **vše přes
-  miniserver** — od verze 0.9.41 přímo v aplikaci na obrazovce privátní sítě
-  (dřív v ovládání na záložce Síť). Přepnutí se projeví do zhruba půl minuty. Podmínka je aplikace v telefonu 21p.34
-  a novější — starší verze umí výstupní uzel zapnout, ale ne vypnout.
-- **Druhý uživatelský profil** na telefonu — limit platí na profil, takže
-  v jednom může běžet komerční VPN a v druhém miniserver.
+- **Pracovní profil** (např. aplikace Shelter) — limit platí na profil,
+  takže komerční VPN může běžet v hlavním profilu a Phone21 v pracovním.
+- Když si zapneš komerční VPN ve stejném profilu, hovory přes miniserver
+  po dobu jejího běhu nechodí.
 
-Bez toho platí prosté pravidlo: když si zapneš komerční VPN, hovory přes
-miniserver po dobu jejího běhu nechodí.
+**„Vše přes miniserver“ (výstupní uzel) komerční VPN nenahrazuje:** provoz
+pak vychází z domácího připojení, ne z místa a pod adresou poskytovatele
+VPN. Stupeň zároveň zpřístupní celou domácí síť a služby miniserveru všem
+aplikacím v telefonu a výstup se zapne až po zhruba 90 s přímého spojení
+(nikdy přes zprostředkující server).
 
 ## Aplikace při odchozím hovoru hlásí „Cannot place a call as there is already another call connecting…"
 
