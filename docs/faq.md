@@ -68,9 +68,9 @@ normálně mimo privátní síť a miniserver o tom nic neví.
 Obráceně to ve výchozím nastavení platí taky: miniserver nepustí provoz
 z privátní sítě dál do domácí sítě ani do internetu a z jeho vlastních
 služeb je vidět jen to, co telefon potřebuje. Od verze 0.9.25 si to
-vynucuje sám a povolit se to dá ve třech stupních — v aplikaci na obrazovce
-privátní sítě i v ovládání (záložka Síť); od verze 0.9.41 je to jedna
-společná volba, změna na jednom místě platí i na druhém:
+vynucuje sám a povolit se to dá ve třech stupních. Volí se v aplikaci na
+obrazovce privátní sítě; ovládání miniserveru (záložka Síť) od verze 0.9.47
+zvolený stupeň jen ukazuje:
 
 - **jen hovory** (výchozí) — hovory, zprávy, ovládání, kontakty, párování;
 - **přístup na miniserver** — i ostatní aplikace v telefonu dosáhnou na

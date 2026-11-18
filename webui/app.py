@@ -310,7 +310,8 @@ def access_level():
 
 
 def set_access_level(level, who):
-    """Uloží stupeň přístupu (stejně z ovládání i z telefonu); OSError chytá volající."""
+    """Uloží stupeň přístupu — jen z telefonu (/pristup na PROV_PORT);
+    ovládání stupeň od 0.9.47 jen ukazuje. OSError chytá volající."""
     write_state(access_path(), level)
     # starý přepínač ladění by volbu přebíjel
     try:
@@ -2681,7 +2682,8 @@ def page_home(info=""):
             "\U0001F527", "Přístup z privátní sítě",
             esc(ACCESS_LABEL[access_level()]), "warn",
             "miniserver pouští z privátní sítě víc než telefonování · "
-            '<a href="%s">změnit</a>' % u("/net")))
+            'mění se v aplikaci Phone21 v telefonu · <a href="%s">podrobnosti</a>'
+            % u("/net")))
 
     calls = read_cdr(limit=1)
     tiles.append(_tile(
@@ -2933,22 +2935,18 @@ def page_net(info=""):
         else:
             fw_txt = "CHYBA — z privátní sítě je miniserver otevřený"
             fw_cls = "bad"
+        # Stupeň se volí jen v telefonu (rozhodnutí 2026-11-18): dvě místa
+        # pro jednu volbu potřebovala synchronizaci oběma směry a telefon
+        # se o změně tady dozvěděl až po otevření své obrazovky. Tady se
+        # jen ukazuje.
         level = access_level()
-        choices = "".join(
-            '<form class="inline" method="post" action="%s">'
-            '<input type="hidden" name="value" value="%s">'
-            "<button%s>%s</button></form> "
-            % (u("/net/access"), key,
-               ' class="ghost"' if key == level else "",
-               esc(ACCESS_LABEL[key]))
-            for key in ACCESS_LEVELS)
         blocks.append(
             "<h2>Přístup z privátní sítě</h2>"
             '<p class="small muted">Filtr provozu: <span class="%s">%s</span></p>'
-            "<p>Telefonování, ovládání, kontakty a párování telefonu jsou "
-            "dostupné vždy. Stejnou volbu má aplikace Phone21 v telefonu "
-            "(obrazovka privátní sítě) — změna na jednom místě platí i na "
-            "druhém:</p>"
+            "<p>Stav: <b>%s</b></p>"
+            "<p>Volí se v aplikaci Phone21 v telefonu (obrazovka privátní "
+            "sítě), tady se jen ukazuje. Telefonování, ovládání, kontakty "
+            "a párování telefonu jsou dostupné vždy:</p>"
             "<ul><li><b>jen hovory</b> — nic dalšího z miniserveru není "
             "z privátní sítě vidět (doporučeno);</li>"
             "<li><b>přístup na miniserver</b> — všechny jeho služby včetně "
@@ -2957,8 +2955,7 @@ def page_net(info=""):
             "<li><b>vše přes miniserver</b> — telefon posílá všechen provoz ven "
             "přes miniserver (výstupní uzel) a miniserver ho propouští do domácí "
             "sítě i ven. Přepnutí se projeví do zhruba půl minuty.</li></ul>"
-            "<p>Stav: <b>%s</b></p>%s"
-            % (fw_cls, esc(fw_txt), esc(ACCESS_LABEL[level]), choices))
+            % (fw_cls, esc(fw_txt), esc(ACCESS_LABEL[level])))
     # Ve stavech, kde se čeká na odpověď sítě, se stránka sama obnovuje —
     # jinak by uživatel koukal na „připojuji“ a musel mačkat obnovení ručně.
     return render("net", "".join(blocks),
@@ -3835,22 +3832,6 @@ class Handler(BaseHTTPRequestHandler):
                 '<span class="mono">%s</span> — heslo se ukáže jen teď, zapiš '
                 "si ho, nebo rovnou naskenuj kód níž.</p>" % (esc(name), esc(password)),
                 login=(name, password)))
-        if self.path == "/net/access":
-            level = form.get("value", "")
-            if level not in ACCESS_LEVELS:
-                return self._html(page_net(
-                    '<p class="bad">[OVL-E24] Neznámá volba přístupu.</p>'))
-            try:
-                set_access_level(level, "ip=%s" % self.client_address[0])
-                # filtr se přepíná do 15 s, inzerce výstupního uzlu jeden
-                # průchod smyčky sítě — pro uživatele tedy „do půl minuty“
-                info = ('<p class="ok">Nastaveno: <b>%s</b>. Projeví se do '
-                        "zhruba půl minuty a přežije restart.</p>"
-                        % esc(ACCESS_LABEL[level]))
-            except OSError as e:
-                info = ('<p class="bad">[OVL-E23] Nejde uložit volbu přístupu: '
-                        "%s</p>" % esc(e))
-            return self._html(page_net(info))
         if self.path == "/diag/at":
             cmd = form.get("cmd", "").strip()
             # Řídicí znaky (CR/LF) by z jednoho příkazu udělaly injekci
