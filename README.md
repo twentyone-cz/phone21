@@ -16,6 +16,12 @@ Produktové stránky: [phone.twentyone.cz](https://phone.twentyone.cz).
   chování k volajícímu (vyzvánět / hláska) se přepíná v ovládání
 - **Jednotný formát čísel** — vše, co telefon uvidí, je E.164 (`+420…`), takže
   se konverzace a kontakty nerozpadají
+- **Souběh s jinou VPN** — ve výchozím stupni *jen hovory* běží privátní síť
+  uvnitř aplikace a místo pro VPN v Androidu nechává volné, takže VPN jiné
+  aplikace (komerční, firemní…) může běžet vedle, bez nastavování
+- **Stupně přístupu** z privátní sítě (jen hovory / přístup na miniserver /
+  vše přes miniserver) se volí v aplikaci v telefonu; ovládání zvolený stupeň
+  ukazuje
 - **Ostrovní režim** — při výpadku domácího internetu se miniserver přepne na
   mobilní data z vlastní SIM a zůstane dosažitelný
 - **Ovládání** ve dvou režimech: spotřebitelský přehled i technický pohled
@@ -66,7 +72,8 @@ sám při startu (`PHONE21_SELFCONFIG=1`), jinak jednorázově `./configure.sh`.
 
 - [`docs/telefon.md`](docs/telefon.md) — nastavení telefonu: kontakty,
   spolehlivé doručování, chování v autě
-- [`docs/faq.md`](docs/faq.md) — časté otázky a řešené problémy
+- [`docs/faq.md`](docs/faq.md) — časté otázky a řešené problémy, mimo jiné
+  souběh s jinou VPN
 
 ## Soukromí
 

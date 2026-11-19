@@ -1,23 +1,37 @@
 # FAQ — provozní otázky a odpovědi
 
-## Android dovolí jen jednu VPN — jak vedle miniserveru provozovat komerční VPN?
+## Můžu mít vedle Phone21 zapnutou jinou VPN (komerční, firemní…)?
 
-Android povolí jednu aktivní VPN na profil a aplikace privátní sítě to
-místo zabere (při každém stupni přístupu). Obojí naráz proto v jednom
-profilu nejde.
+**Ano.** Od aplikace 6.2.4-21p.46 běží privátní síť ve výchozím stupni
+**jen hovory** uvnitř aplikace Phone21 a systémovou VPN vůbec nepoužívá.
+Místo pro VPN v Androidu tak zůstává volné a VPN libovolné jiné aplikace
+může běžet souběžně — nic se nenastavuje. Hovory i zprávy jdou dál a hlas
+je šifrovaný až do miniserveru; během hovoru to ukazuje štítek
+„Šifrováno do miniserveru“.
 
-Co s tím:
+Android dovolí jen jednu VPN naráz. Místo pro ni Phone21 potřebuje jen
+v těchto případech:
 
-- **Pracovní profil** (např. aplikace Shelter) — limit platí na profil,
-  takže komerční VPN může běžet v hlavním profilu a Phone21 v pracovním.
-- Když si zapneš komerční VPN ve stejném profilu, hovory přes miniserver
-  po dobu jejího běhu nechodí.
+- **Přístup na miniserver** a **vše přes miniserver** — tyhle stupně dávají
+  privátní síť i ostatním aplikacím v telefonu, a to jde jen přes systémovou
+  VPN. Když běží jiná VPN, aplikace se zeptá, jestli ji vypnout. Když
+  odmítneš, hovory jedou dál uvnitř aplikace a přístup ostatních aplikací
+  zůstane vypnutý.
+- **Synchronizovat kontakty i přes privátní síť** — synchronizační aplikace
+  je jiná aplikace, proto i ve stupni jen hovory potřebuje místo pro VPN.
+  Když běží jiná VPN, kontakty se přes privátní síť nesynchronizují; doma
+  po wifi se synchronizuje účet s adresou pro domácí síť.
+
+Kvůli samotnému souběhu s VPN už pracovní profil (např. aplikace Shelter)
+potřeba není. Má smysl jen tehdy, když chceš vyšší stupeň přístupu a zároveň
+jinou VPN: limit jedné VPN platí na profil, takže jiná VPN může běžet
+v hlavním profilu a Phone21 v pracovním.
 
 **„Vše přes miniserver“ (výstupní uzel) komerční VPN nenahrazuje:** provoz
 pak vychází z domácího připojení, ne z místa a pod adresou poskytovatele
 VPN. Stupeň zároveň zpřístupní celou domácí síť a služby miniserveru všem
 aplikacím v telefonu a výstup se zapne až po zhruba 90 s přímého spojení
-(nikdy přes zprostředkující server).
+(nikdy přes přenosový uzel).
 
 ## Aplikace při odchozím hovoru hlásí „Cannot place a call as there is already another call connecting…"
 
@@ -61,9 +75,10 @@ jiné cestě a fungují dál. Stav vidíš v ovládání u dlaždice mobilní s�
 
 ## Posílá aplikace do privátní sítě všechen provoz telefonu?
 
-Ne. Do privátní sítě jde jen provoz na miniserver — hovory, zprávy a jeho
-web UI. Všechno ostatní (web, e-mail, streamování) jde z telefonu
-normálně mimo privátní síť a miniserver o tom nic neví.
+Ne. Ve výchozím stupni jen hovory jde do privátní sítě jen provoz aplikace
+Phone21 na miniserver — hovory, zprávy a nastavení účtu; ostatní aplikace
+v telefonu do ní vůbec nevidí. Všechno ostatní (web, e-mail, streamování)
+jde z telefonu normálně mimo privátní síť a miniserver o tom nic neví.
 
 Obráceně to ve výchozím nastavení platí taky: miniserver nepustí provoz
 z privátní sítě dál do domácí sítě ani do internetu a z jeho vlastních
@@ -73,16 +88,19 @@ obrazovce privátní sítě; ovládání miniserveru (záložka Síť) od verze 
 zvolený stupeň jen ukazuje:
 
 - **jen hovory** (výchozí) — hovory, zprávy, ovládání, kontakty, párování;
+  v telefonu se do sítě dostane jen aplikace Phone21 a místo pro VPN
+  zůstává volné;
 - **přístup na miniserver** — i ostatní aplikace v telefonu dosáhnou na
   všechny služby miniserveru (dashboard, další aplikace, vzdálená správa);
   dál než na miniserver se pořád nedostaneš;
 - **vše přes miniserver** — všechen provoz telefonu jde ven přes miniserver,
   který ho propouští do domácí sítě i do internetu (výstupní uzel).
 
-Domácí sítě se filtr netýká v žádném stupni.
+Druhé dva stupně potřebují v telefonu místo pro VPN (viz otázka o jiné VPN
+výš). Domácí sítě se filtr netýká v žádném stupni.
 
-Výjimkou je, když si výstupní uzel zapneš sám (viz otázka o komerční VPN
-výš) — pak přes něj jde všechno, protože přesně o to jde.
+Výjimkou je, když si výstupní uzel zapneš sám — pak přes něj jde všechno,
+protože přesně o to jde.
 
 ## Po připojení aplikace přestal na telefonu fungovat internet
 
@@ -96,8 +114,10 @@ Od verze 21p.26 aplikace systému rovnou říká, že trvalé připojení
 (always-on) nepodporuje — volba „Blokovat připojení bez VPN" se u ní už
 vůbec nenabízí a omylem zapnout nejde.
 
-(Pokud používáš jinou VPN na celý provoz, téhle volby se to netýká —
-patří k té druhé aplikaci, ne k Phone21.)
+Ve stupni jen hovory (od 21p.46) Phone21 systémovou VPN nepoužívá, takže
+se tě tohle týká jen u vyšších stupňů nebo se zapnutou synchronizací
+kontaktů přes privátní síť. (Pokud používáš jinou VPN na celý provoz, téhle
+volby se to netýká — patří k té druhé aplikaci, ne k Phone21.)
 
 ## Potřebuju se k miniserveru dostat na dálku kvůli servisu
 
@@ -141,7 +161,11 @@ zpátky. Účty pro jednotlivá zařízení se zakládají v ovládání na zál
 Synchronizace jde na adresu miniserveru — doma po wifi, mimo domov přes
 privátní síť. Když privátní síť na telefonu neběží, synchronizace počká.
 Od verze 21p.32 umí aplikace pustit do privátní sítě i synchronizační
-aplikaci; bez toho se synchronizuje jen doma.
+aplikaci (volba *Synchronizovat kontakty i přes privátní síť*, nebo stupeň
+*přístup na miniserver*); bez toho se synchronizuje jen doma. Obojí
+potřebuje v telefonu místo pro VPN — když běží VPN jiné aplikace,
+synchronizace přes privátní síť nejede. Doma po wifi se synchronizuje
+účet s adresou pro domácí síť.
 
 ## Jsou kontakty na miniserveru šifrované?
 

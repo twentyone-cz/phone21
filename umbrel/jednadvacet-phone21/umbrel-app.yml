@@ -10,18 +10,21 @@ description: >-
   hovory a zprávy z tvého čísla dostaneš do aplikace Phone21 v mobilu, ať jsi
   kdekoli — přes privátní šifrovanou síť, bez veřejné IP a bez port forwardu.
   Zmeškané hovory chodí jako zpráva, zprávy fungují obousměrně, hovory jdou
-  po datové síti operátora.
+  po datové síti operátora. Aplikace ve výchozím nastavení nezabírá v telefonu
+  místo pro VPN, takže vedle ní může běžet VPN jiné aplikace.
 
 
   Potřebuješ podporovaný USB LTE modem a SIM kartu; odladěné sestavy
   a návod najdeš na phone.twentyone.cz. Pro spojení s telefonem na cestách
-  je potřeba klíč privátní sítě (bez registrace, platba Lightningem) —
-  na domácí síti funguje aplikace i bez něj.
+  jsou potřeba kredity privátní sítě (bez registrace, platba Lightningem) —
+  na domácí síti funguje aplikace i bez nich.
 
 
   Phone21 turns a USB LTE modem with your SIM card into a private phone
   system: calls and messages from your number reach the Phone21 app anywhere
   via a private encrypted network — no public IP, no port forwarding needed.
+  By default the app does not take the phone's VPN slot, so another VPN app
+  can run alongside it.
 developer: jednadvacet
 website: https://phone.twentyone.cz
 dependencies: []

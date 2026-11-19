@@ -2948,13 +2948,19 @@ def page_net(info=""):
             "sítě), tady se jen ukazuje. Telefonování, ovládání, kontakty "
             "a párování telefonu jsou dostupné vždy:</p>"
             "<ul><li><b>jen hovory</b> — nic dalšího z miniserveru není "
-            "z privátní sítě vidět (doporučeno);</li>"
+            "z privátní sítě vidět (doporučeno). Aplikace od verze 21p.46 "
+            "přitom v telefonu nezabírá místo pro VPN, takže vedle ní může "
+            "běžet VPN jiné aplikace;</li>"
             "<li><b>přístup na miniserver</b> — všechny jeho služby včetně "
             "vzdálené správy a ostatních aplikací; dál než na miniserver se "
             "nedostane;</li>"
             "<li><b>vše přes miniserver</b> — telefon posílá všechen provoz ven "
             "přes miniserver (výstupní uzel) a miniserver ho propouští do domácí "
             "sítě i ven. Přepnutí se projeví do zhruba půl minuty.</li></ul>"
+            '<p class="small muted">Druhé dva stupně pouštějí do privátní sítě '
+            "i ostatní aplikace v telefonu, a proto tam potřebují místo pro "
+            "VPN. Když v telefonu běží VPN jiné aplikace, Phone21 se zeptá, "
+            "jestli ji vypnout; hovory jdou dál i bez toho.</p>"
             % (fw_cls, esc(fw_txt), esc(ACCESS_LABEL[level])))
     # Ve stavech, kde se čeká na odpověď sítě, se stránka sama obnovuje —
     # jinak by uživatel koukal na „připojuji“ a musel mačkat obnovení ručně.
@@ -3229,8 +3235,9 @@ def page_qr(url, remote=False, join_key="", key_err=""):
     manual_note = ""
     if remote and join_key:
         where = """<p><b>Kód míří na miniserver v privátní síti a nese jednorázový
-klíč do ní.</b> Aplikace telefon nejdřív připojí do sítě (potvrď souhlas
-s VPN) a pak si stáhne nastavení. Kód platí 10 minut a jen jednou. Kdo ho
+klíč do ní.</b> Aplikace telefon nejdřív připojí do sítě a pak si stáhne
+nastavení (ve stupni jen hovory se od verze 21p.46 na souhlas s VPN neptá,
+starší verze ho chtějí potvrdit). Kód platí 10 minut a jen jednou. Kdo ho
 naskenuje, dostane účet i přístup do sítě, takže ho nikomu neukazuj.</p>"""
         manual_note = ("<p>Ruční odkaz funguje, jen když už je telefon "
                        "v privátní síti.</p>")

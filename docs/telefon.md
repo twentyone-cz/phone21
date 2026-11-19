@@ -124,12 +124,18 @@ importu ověř, jestli se do exportu dostanou, se liší.
    to, které ovládání při přidání ukázalo (zapomenuté nahradíš volbou *Nové
    heslo*). Potvrď nešifrované spojení a zapni adresář **Kontakty**
    i **Kalendář**.
-3. Aby se DAVx⁵ dostal k miniserveru i mimo domov, nastav v aplikaci Phone21
-   na obrazovce **Konexe** jednu z těchto voleb:
+3. Na adresu pro privátní síť (doma i venku) se DAVx⁵ dostane, jen když ho
+   tam aplikace Phone21 pustí. Nastav v ní na obrazovce **Konexe** jednu
+   z těchto voleb:
    - **Přístup na miniserver**: do privátní sítě smí všechny aplikace;
    - **Synchronizovat kontakty i přes privátní síť**: zbytek telefonu zůstane
      mimo privátní síť. Volba platí pro kontakty i kalendář, obojí
      synchronizuje DAVx⁵.
+
+   Obě volby potřebují v telefonu místo pro VPN (DAVx⁵ je jiná aplikace než
+   Phone21). Když v telefonu běží VPN jiné aplikace, Phone21 se zeptá, jestli
+   ji vypnout; dokud běží, synchronizace přes privátní síť nejede. Hovory
+   jdou dál v každém případě (oddíl 3, *Stupně přístupu a jiná VPN*).
 4. Nastav, kam se mají ukládat nové záznamy. Kontakt založený do *Telefon /
    Zařízení* nebo událost v lokálním kalendáři zůstanou jen v tom zařízení.
    - **Kontakty:** v aplikaci Kontakty → Nastavení → *Výchozí účet pro nové
@@ -181,11 +187,11 @@ vlastní přihlášení a vlastní DAVx⁵.** Obsah je všude stejný.
 - **Hovory a zprávy chodí jen do profilu s aplikací Phone21.** Jména
   volajících bere z kontaktů téhož profilu, proto tam adresář z miniserveru
   být musí.
-- **Privátní síť běží jen v profilu s aplikací Phone21**, protože připojení
-  tohoto druhu patří vždy jen jednomu profilu. V ostatních profilech použij
-  adresu pro **domácí síť**. Synchronizace pak proběhne, když je telefon doma
-  na Wi-Fi, a změny z cesty se dorovnají po návratu. V DAVx⁵ v nastavení účtu
-  zapni *Synchronizovat jen přes Wi-Fi*, ať to venku zbytečně nezkouší.
+- **Privátní síť běží jen v profilu s aplikací Phone21.** V ostatních
+  profilech použij adresu pro **domácí síť**. Synchronizace pak proběhne,
+  když je telefon doma na Wi-Fi, a změny z cesty se dorovnají po návratu.
+  V DAVx⁵ v nastavení účtu zapni *Synchronizovat jen přes Wi-Fi*, ať to
+  venku zbytečně nezkouší.
 - Pokud potřebuješ synchronizovat i venku v dalším profilu, musí být do
   privátní sítě připojený i ten. Počítá se pak jako další zařízení a čerpá
   kredit navíc (1 denně).
@@ -337,8 +343,9 @@ zobrazuje se i na displeji auta (viz níže).
 
 ## 3. Připojení k miniserveru
 
-Telefon a miniserver se spolu spojí přes privátní síť — uzavřené spojení
-jen mezi tvým telefonem a miniserverem, nikam jinam telefon přes ni nevidí.
+Telefon a miniserver se spolu spojí přes privátní síť. Ve výchozím stupni
+*jen hovory* je to uzavřené spojení jen mezi aplikací Phone21
+a miniserverem, nikam jinam telefon přes ni nevidí.
 
 **Účet se nastavuje naskenováním QR kódu**, ne ručně: v ovládání
 miniserveru záložka *Telefon* → *Zobrazit QR*. Kód nese jednorázový odkaz
@@ -346,9 +353,45 @@ na konfiguraci (platí 10 minut, jedno použití) a přečte ho jak skener
 přímo v aplikaci Phone21, tak běžný fotoaparát telefonu. Když skener
 nespolupracuje, jde odkaz opsat ručně — je pod QR kódem.
 
-Do privátní sítě se telefon zatím připojuje zvlášť: v aplikaci
-*Nastavení → Privátní síť → Připojit* a potvrzení peněženkou v prohlížeči.
-(Spojení obojího do jediného QR kódu se připravuje.)
+Týž QR kód připojí telefon i do privátní sítě, když je miniserver do sítě
+připojený tokenem brány (ovládání, záložka *Síť*). Jinak jde telefon do
+sítě připojit v aplikaci na obrazovce *Konexe* tlačítkem *Připojit přes
+Moji síť* a potvrzením peněženkou v prohlížeči.
+
+### Stupně přístupu a jiná VPN
+
+Na obrazovce *Konexe* volíš, co z telefonu smí do privátní sítě. Volí se
+jen tam (od aplikace 21p.46); ovládání miniserveru zvolený stupeň na záložce
+*Síť* jen ukazuje (od 0.9.47).
+
+| Stupeň | Co smí do privátní sítě | Místo pro VPN v telefonu |
+|---|---|---|
+| **Jen hovory** (výchozí) | jen aplikace Phone21: hovory a zprávy | nezabírá, jiná VPN může běžet vedle |
+| **Přístup na miniserver** | i ostatní aplikace, ke všem službám miniserveru; zbytek internetu jde mimo | potřebuje |
+| **Vše přes miniserver** | všechen provoz telefonu, ven jde přes miniserver (výstupní uzel) | potřebuje |
+
+**Jen hovory** běží uvnitř aplikace a systémovou VPN vůbec nepoužívá. VPN
+jiné aplikace (komerční, firemní…) proto může běžet souběžně, bez
+nastavování. Hlas je šifrovaný až do miniserveru, během hovoru to ukazuje
+štítek *Šifrováno do miniserveru*. Výjimka: se zapnutou volbou
+*Synchronizovat kontakty i přes privátní síť* potřebuje místo pro VPN i tenhle
+stupeň (1B, bod 3).
+
+**Přístup na miniserver** a **vše přes miniserver** dávají síť i ostatním
+aplikacím, a to jde jen přes systémovou VPN. Android přitom dovolí jen
+jednu. Když běží VPN jiné aplikace, Phone21 se zeptá, jestli ji vypnout.
+Když odmítneš, hovory jedou dál uvnitř aplikace a přístup ostatních
+aplikací zůstane vypnutý; zapneš ho později tlačítkem *Zapnout přístup*.
+
+**Vše přes miniserver komerční VPN nenahrazuje.** Provoz vychází z domácího
+připojení, stupeň zpřístupní celou domácí síť a služby miniserveru všem
+aplikacím v telefonu a výstup se zapne až po zhruba 90 s přímého spojení,
+přes přenosový uzel nikdy.
+
+Pracovní profil (např. aplikace Shelter) kvůli souběhu s VPN potřeba není.
+Hodí se jen tomu, kdo chce vyšší stupeň a zároveň jinou VPN: limit jedné
+VPN platí na profil, takže jiná VPN poběží v hlavním profilu a Phone21
+v pracovním.
 
 ### Spolehlivé doručení hovorů
 
@@ -365,8 +408,9 @@ baterii. Zbývá pár kroků, které za tebe udělat nemůže:
 
 Systémovou volbu **Always-on VPN** nehledej — aplikace ji od verze 21p.26
 záměrně nenabízí (spolu s ní by šlo omylem zapnout „Blokovat připojení bez
-VPN", které telefon odřízne od internetu). Připojení k privátní síti se po
-restartu telefonu obnoví samo.
+VPN", které telefon odřízne od internetu). Ve stupni jen hovory Phone21
+systémovou VPN vůbec nepoužívá. Připojení k privátní síti se po restartu
+telefonu obnoví samo.
 
 **Zmeškané hovory:** když je telefon nedostupný, miniserver pošle do
 aplikace zprávu „Zmeškaný hovor v HH:MM" od čísla volajícího; doručí se po
@@ -375,7 +419,7 @@ přepíná v ovládání miniserveru.
 
 ## 4. Handsfree v autě (Bluetooth HFP / Android Auto)
 
-Poctivá tabulka (stav od 21p.28):
+Přehled (stav od 21p.28):
 
 | Přání | Jde? | Jak / proč ne |
 |---|---|---|
