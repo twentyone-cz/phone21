@@ -3,7 +3,7 @@ id: jednadvacet-phone21
 category: networking
 icon: https://phone.twentyone.cz/img/phone21-icon.svg
 name: Phone21
-version: "0.9.46"
+version: "0.9.47"
 tagline: Tvoje telefonní číslo s tebou kamkoli — přes vlastní miniserver
 description: >-
   Phone21 promění USB LTE modem se SIM kartou v soukromou telefonní ústřednu:
@@ -38,11 +38,9 @@ deterministicPassword: true
 submitter: jednadvacet
 submission: https://github.com/twentyone-cz/umbrel-store
 releaseNotes: >-
-  Ústředna už nespadne po prvním hovoru — dřív se po něm na chvíli
-  restartovala a další hovor se nespojil. Vyzvánění u odchozího hovoru je
-  teď české, stejné jako na běžném mobilu. Když hovor nevyjde, krátce
-  zapípá: pomalu, když je obsazeno nebo volaný hovor odmítl, rychle, když je
-  nedostupný nebo má vypnutý telefon (to se pozná nejpozději do 30 sekund,
-  dřív se čekalo minutu v tichu). Hlášky operátora před přijetím hovoru
-  slyšet nebudou — modem je do hovoru nepouští, místo nich hrál jen vlastní
-  zkreslený tón, a ten je teď vypnutý.
+  Stupeň přístupu do privátní sítě se teď volí v aplikaci Phone21
+  v telefonu; ovládání na záložce Síť zvolený stupeň ukazuje. S aplikací
+  21p.46 nezabírá výchozí stupeň „jen hovory“ v telefonu místo pro VPN,
+  takže vedle Phone21 může běžet VPN jiné aplikace (komerční, firemní…).
+  Nápověda, popis aplikace a návody to vysvětlují, včetně případů, kdy
+  místo pro VPN potřeba je.
